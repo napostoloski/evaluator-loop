@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evloop"
+version = "0.1.0"
+description = "An AI-enabled loop for locating the roots of evaluator bias: prototype and planted-rule benchmark"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["numpy>=1.26", "scipy>=1.11", "pandas>=2.0", "scikit-learn>=1.5", "matplotlib>=3.8",
+                "tabulate>=0.9", "threadpoolctl>=3.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools]
+packages = ["evloop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
