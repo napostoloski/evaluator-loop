@@ -72,14 +72,16 @@ def cmd_llm_demo(a):
 
     apps = sample_applications(156, seed=a.seed)
     world = make_world(apps, seed=a.seed, delta=a.delta, rho=a.rho)
-    extra = {}
+    extra = json.loads(a.extra_body) if a.extra_body else {}
     if a.no_thinking:
         extra["chat_template_kwargs"] = {"enable_thinking": False}
     if a.top_p is not None:
         extra["top_p"] = a.top_p
+    headers = dict(h.split(":", 1) for h in (a.header or []))
+    headers = {k.strip(): v.strip() for k, v in headers.items()}
     client = LLMClient(a.base_url, a.model, api_key=a.api_key, seed=a.seed, extra_body=extra,
                        temperature=None if a.temperature < 0 else a.temperature,
-                       max_tokens_field=a.max_tokens_field,
+                       max_tokens_field=a.max_tokens_field, extra_headers=headers,
                        cache_dir=os.path.join(a.out, "llm_cache"), log_path=os.path.join(a.out, "llm_calls.jsonl"))
     backend = LLMBackend(client, world)
     k, budget = _design(a.battery_apps)
@@ -108,6 +110,7 @@ def cmd_llm_demo(a):
     os.makedirs(a.out, exist_ok=True)
     pd.DataFrame(rows).to_csv(os.path.join(a.out, f"llm_demo_seed{a.seed}_audit_trail.csv"), index=False)
     print(f"\nedits dropped by the similarity or manipulation check: {backend.dropped_edits}")
+    print(f"model calls: {client.n_calls}; replies cut off without an answer: {client.truncations}")
 
 
 def main():
@@ -134,6 +137,9 @@ def main():
     l.add_argument("--top-p", type=float, default=None)
     l.add_argument("--max-tokens-field", default="max_tokens", help="e.g. max_completion_tokens for reasoning APIs")
     l.add_argument("--rho", type=float, default=0.6)
+    l.add_argument("--header", action="append", help='extra HTTP header, "Name: value" (repeatable)')
+    l.add_argument("--extra-body", default=None,
+                   help='JSON merged into every request, e.g. \'{"thinking": {"type": "between_tools"}}\' for Claude')
     l.add_argument("--out", default="outputs/llm"); l.set_defaults(f=cmd_llm_demo)
     a = p.parse_args()
     a.f(a)

@@ -79,8 +79,10 @@ class LLMClient:
     def __init__(self, base_url: str, model: str, api_key: str | None = None,
                  temperature: float | None = 0.0, seed: int | None = 0, extra_body: dict | None = None,
                  max_tokens_field: str = "max_tokens", cache_dir: str | None = "llm_cache",
-                 log_path: str | None = "llm_calls.jsonl", timeout: int = 180, retries: int = 3):
+                 log_path: str | None = "llm_calls.jsonl", timeout: int = 180, retries: int = 3,
+                 extra_headers: dict | None = None):
         self.base_url = base_url.rstrip("/")
+        self.extra_headers = extra_headers or {}
         self.model = model
         self.api_key = api_key or os.environ.get("EVLOOP_API_KEY")
         self.temperature = temperature
@@ -91,6 +93,8 @@ class LLMClient:
         self.log_path = log_path
         self.timeout = timeout
         self.retries = retries
+        self.n_calls = 0
+        self.truncations = 0
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
 
@@ -131,11 +135,25 @@ class LLMClient:
             rec = dict(time=time.time(), latency=latency, key=key, cached=False, request=r,
                        content=content, finish_reason=finish, usage=body.get("usage"))
             self._log(rec)
-            if not content and finish == "length":
-                raise RuntimeError(
-                    "The model used the whole token limit without a final answer (probably reasoning). "
-                    "Turn reasoning off (e.g. --no-thinking on vLLM with Qwen3-family models), use a "
-                    "non-reasoning model, or raise the token limits.")
+            self.n_calls += 1
+            if finish == "length" and (not content or (validate is not None and not validate(content))):
+                # the reply was cut off before an answer: try once more with a larger budget
+                r2 = dict(r); r2[self.max_tokens_field] = max_tokens * 4
+                body, latency = self._post(r2)
+                choice = body["choices"][0]
+                content = strip_think(choice.get("message", {}).get("content"))
+                finish = choice.get("finish_reason")
+                rec = dict(time=time.time(), latency=latency, key=key, cached=False, request=r2,
+                           content=content, finish_reason=finish, usage=body.get("usage"), retry="length")
+                self._log(rec)
+                if finish == "length" and (not content or (validate is not None and not validate(content))):
+                    self.truncations += 1
+                    if self.truncations >= 10 and self.truncations > 0.5 * self.n_calls:
+                        raise RuntimeError(
+                            "Most replies use the whole token limit without a final answer (probably "
+                            "reasoning). Turn reasoning off (e.g. --no-thinking on vLLM with Qwen3-family "
+                            "models), use a non-reasoning model, or raise the token limits.")
+                    return content
             if validate is None or validate(content):
                 if path:
                     with open(path, "w") as f:
@@ -145,6 +163,7 @@ class LLMClient:
 
     def _post(self, req):
         headers = {"Content-Type": "application/json"}
+        headers.update(self.extra_headers)
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         data = json.dumps(req).encode()
@@ -275,7 +294,7 @@ def edit_llm(client: LLMClient, text: str, description: str, present: bool,
 # ---------------------------------------------------------------------------
 # Coder: does an application have a feature?
 # ---------------------------------------------------------------------------
-CODE_USER = """Does the following statement describe the startup application below? Answer with one word, yes or no.
+CODE_USER = """Does the following statement describe the startup application below? Begin your reply with the single word yes or no.
 
 Statement: "{description}"
 
@@ -290,7 +309,7 @@ def _yes_no(text):
 
 def code_llm(client: LLMClient, text: str, description: str) -> int:
     reply = client.chat([{"role": "user", "content": CODE_USER.format(description=description, text=text)}],
-                        max_tokens=20, validate=lambda t: _yes_no(t) in ("yes", "no"))
+                        max_tokens=40, validate=lambda t: _yes_no(t) in ("yes", "no"))
     return int(_yes_no(reply) == "yes")
 
 
@@ -301,11 +320,17 @@ TWIN_SYSTEM = (
     "You are imitating one specific expert evaluator of startup applications for an incubation "
     "program in Pakistan. For each example you see how far this evaluator's score was above (+) "
     "or below (-) the average of the other evaluators. Learn this evaluator's idiosyncrasies and "
-    "predict the deviation for a new application. Reply with a single signed number between -2 and 2.")
+    "predict the deviation for a new application, a signed number between -2 and 2. You may reason "
+    "briefly, but the last line of your reply must be exactly of the form DEVIATION=<number>, "
+    "for example DEVIATION=+0.35 or DEVIATION=-0.20.")
 
 
 def _last_number(text):
-    nums = re.findall(r"[-+]?\d+(?:\.\d+)?", strip_think(text))
+    t = strip_think(text)
+    m = re.findall(r"DEVIATION\s*[=:]\s*([-+]?\d+(?:\.\d+)?)", t, flags=re.I)
+    if m:
+        return float(m[-1])
+    nums = re.findall(r"[-+]?\d+(?:\.\d+)?", t)
     return float(nums[-1]) if nums else None
 
 
@@ -321,7 +346,8 @@ class LLMTwin:
                 {"role": "user", "content": f"{shots}\n\nAPPLICATION\n{text[:self.max_chars]}\nDEVIATION:"}]
 
     def deviation(self, text: str) -> float:
-        reply = self.client.chat(self._prompt(text), max_tokens=20, validate=lambda t: _last_number(t) is not None)
+        reply = self.client.chat(self._prompt(text), max_tokens=240,
+                                 validate=lambda t: re.search(r"DEVIATION\s*[=:]\s*[-+]?\d", strip_think(t), re.I) is not None)
         x = _last_number(reply)
         return float(np.clip(x, -2, 2)) if x is not None else float("nan")
 
