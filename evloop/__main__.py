@@ -83,7 +83,8 @@ def cmd_llm_demo(a):
                        temperature=None if a.temperature < 0 else a.temperature,
                        max_tokens_field=a.max_tokens_field, extra_headers=headers,
                        cache_dir=os.path.join(a.out, "llm_cache"), log_path=os.path.join(a.out, "llm_calls.jsonl"))
-    backend = LLMBackend(client, world, n_twin_pairs=a.twin_pairs, twin=a.twin, verify=not a.no_verify_edits)
+    backend = LLMBackend(client, world, n_twin_pairs=a.twin_pairs, twin=a.twin, verify=not a.no_verify_edits,
+                         workers=a.workers)
     k, budget = _design(a.battery_apps)
     cfg = LoopConfig(seed=a.seed, battery_apps=a.battery_apps, battery_features=k, budget=budget, max_rounds=a.rounds)
     results = run_panel(world, backend, cfg)
@@ -229,6 +230,7 @@ def main():
                    help="screen with a few-shot LLM copy (default) or with the ridge text copy on the LLM's edits (no model calls)")
     l.add_argument("--twin-pairs", type=int, default=30, help="edited pairs per hypothesis for the screen")
     l.add_argument("--no-verify-edits", action="store_true", help="skip the verifier call on battery edits")
+    l.add_argument("--workers", type=int, default=4, help="concurrent model calls during screening")
     l.add_argument("--extra-body", default=None,
                    help='JSON merged into every request, e.g. \'{"thinking": {"type": "between_tools"}}\' for Claude')
     l.add_argument("--out", default="outputs/llm"); l.set_defaults(f=cmd_llm_demo)

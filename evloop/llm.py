@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
 import os
@@ -95,12 +97,13 @@ class LLMClient:
         self.retries = retries
         self.n_calls = 0
         self.truncations = 0
+        self._lock = threading.Lock()
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
 
     def _log(self, rec):
         if self.log_path:
-            with open(self.log_path, "a") as f:
+            with self._lock, open(self.log_path, "a") as f:
                 f.write(json.dumps(rec) + "\n")
 
     def chat(self, messages: list, max_tokens: int = 800, validate=None) -> str:
@@ -135,7 +138,8 @@ class LLMClient:
             rec = dict(time=time.time(), latency=latency, key=key, cached=False, request=r,
                        content=content, finish_reason=finish, usage=body.get("usage"))
             self._log(rec)
-            self.n_calls += 1
+            with self._lock:
+                self.n_calls += 1
             if finish == "length" and (not content or (validate is not None and not validate(content))):
                 # the reply was cut off before an answer: try once more with a larger budget
                 r2 = dict(r); r2[self.max_tokens_field] = max_tokens * 4
@@ -147,7 +151,8 @@ class LLMClient:
                            content=content, finish_reason=finish, usage=body.get("usage"), retry="length")
                 self._log(rec)
                 if finish == "length" and (not content or (validate is not None and not validate(content))):
-                    self.truncations += 1
+                    with self._lock:
+                        self.truncations += 1
                     if self.truncations >= 10 and self.truncations > 0.5 * self.n_calls:
                         raise RuntimeError(
                             "Most replies use the whole token limit without a final answer (probably "
@@ -156,8 +161,10 @@ class LLMClient:
                     return content
             if validate is None or validate(content):
                 if path:
-                    with open(path, "w") as f:
+                    tmp = path + f".{threading.get_ident()}.tmp"
+                    with open(tmp, "w") as f:
                         json.dump(rec, f)
+                    os.replace(tmp, path)
                 return content
         return content
 
@@ -532,8 +539,10 @@ class LLMBackend:
     """
 
     def __init__(self, client: LLMClient, world, n_shots: int = 12, n_twin_pairs: int = 30,
-                 min_similarity: float = 0.6, twin: str = "llm", verify: bool = True, log=print):
+                 min_similarity: float = 0.6, twin: str = "llm", verify: bool = True, workers: int = 4, log=print):
         self.client = client
+        self.workers = max(1, workers)
+        self._lock = threading.Lock()
         self.world = world
         self.texts = [a.text for a in world.apps]
         self.n_shots = n_shots
@@ -553,8 +562,9 @@ class LLMBackend:
         return re.sub(r"[^a-z0-9]+", " ", description.lower()).strip()
 
     def _drop(self, reason):
-        self.dropped_edits += 1
-        self.drop_reasons[reason] = self.drop_reasons.get(reason, 0) + 1
+        with self._lock:
+            self.dropped_edits += 1
+            self.drop_reasons[reason] = self.drop_reasons.get(reason, 0) + 1
 
     def propose(self, j, resid, excluded, cfg, rng, rnd):
         ex = [self.descriptions.get(f, f) for f in excluded]
@@ -602,7 +612,13 @@ class LLMBackend:
             llm_twin = LLMTwin(self.client, [(self.texts[i], float(resid[i])) for i in shots])
             twin_effect = llm_twin.edit_effect
         for h in hyps:
-            pairs = [p for p in (self._edit_pair(int(i), h.description) for i in held[: self.n_twin_pairs]) if p]
+            idx = [int(i) for i in held[: self.n_twin_pairs]]
+            if self.workers > 1:
+                with ThreadPoolExecutor(max_workers=self.workers) as ex:
+                    results = list(ex.map(lambda i: self._edit_pair(i, h.description), idx))
+            else:
+                results = [self._edit_pair(i, h.description) for i in idx]
+            pairs = [p for p in results if p]
             eff, ci = twin_effect(pairs)
             sign = 1.0 if h.target == 1 else -1.0
             h.twin_effect = sign * eff
