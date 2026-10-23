@@ -267,3 +267,17 @@ evaluators. Those evaluators read edits through regular-expression detectors tha
 some common paraphrases but not all. The demo therefore measures partly whether the LLM's
 edits change the features as these detectors perceive them. The LLM backend's
 manipulation check uses the LLM coder instead.
+
+## 8. First real-model run
+
+On 23 October 2026 the LLM path ran end to end on Claude Sonnet 5.5 (seed 1, same world
+and budget as the benchmark). One of 16 planted preferences was confirmed, correctly and
+with the right size (Evaluator 0's gender cue, +0.45 against +0.50 planted, q = 0.0004),
+with no false confirmations. Recall was low for three reasons that the offline stand-ins
+cannot exhibit: hypotheses phrased differently by different evaluators were not pooled,
+so the battery budget went to singletons; the few-shot copy predicts from 10 pairs and is
+noisy; and many rewrites were incomplete (pronouns switched, name kept) yet passed the
+checks. `outputs/llm_sonnet/RUN_SUMMARY.md` gives the numbers and the fixes: a
+canonicalisation call that merges equivalent hypotheses, 30 pairs for the copy, and a
+manipulation check that verifies the markers named in the hypothesis. These are the
+pre-conditions for running the AI steps on real applications.

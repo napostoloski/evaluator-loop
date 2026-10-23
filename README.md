@@ -164,8 +164,33 @@ Commercial endpoints work the same way (set `EVLOOP_API_KEY`). For models that r
 `--temperature` and `--top-p` set sampling. Replies are cached, so runs stay reproducible at
 any temperature.
 
-The LLM path has been tested end to end against a stub server (`tests/stub_server.py`). It
-has not yet been run against a real model.
+Claude models reason before they answer and the OpenAI-style endpoint does not return that
+reasoning, so turn it off and leave the temperature unset:
+
+```bash
+EVLOOP_API_KEY=... python -m evloop llm-demo --base-url https://api.anthropic.com/v1 \
+    --model claude-sonnet-5-5 --temperature -1 --extra-body '{"thinking": {"type": "between_tools"}}'
+```
+
+### First real-model run
+
+The LLM path was run end to end on Claude Sonnet 5.5 on 23 October 2026 (seed 1, about
+4,300 live calls, roughly $25). The model proposed four plain-language hypotheses per
+evaluator, rewrote the applications, coded features and acted as every evaluator's copy;
+the simulated evaluators re-rated the edits as in the benchmark.
+
+- 80 hypotheses proposed, 27 passed the copy's screen, 5 reached a re-rating battery,
+  1 was confirmed, and it was correct: Evaluator 0's planted same-gender cue, estimated
+  at +0.45 against the panel (planted +0.50), q = 0.0004. No false confirmations.
+- Recall was 1 of 16 planted preferences. The cause is not the confirmation step but three
+  weaknesses of the AI steps that the offline stand-ins do not have: free-text hypotheses
+  were not pooled across evaluators, so batteries went to singletons and 22 passing
+  hypotheses were never tested; the language-model copy, predicting from 10 pairs, is
+  noisier than the ridge copy; and the rewrites were often half-edits (pronouns switched,
+  name kept) that the checks let through.
+- All three have mechanical fixes, listed in
+  [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md) with the
+  audit trail. The stub-server tests (`tests/stub_server.py`) remain the plumbing check.
 
 ## What the benchmark does not show
 
