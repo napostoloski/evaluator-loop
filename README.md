@@ -209,9 +209,16 @@ the simulated evaluators re-rated the edits as in the benchmark.
     the new checks accept 393 and 84% switch it (gender edits: 100%, up from 51%).
   - On the stub server, the full demo now pools the shared feature across evaluators and
     confirms only planted preferences (9 of the 10 it can reach, no false findings).
-  The first run's numbers and the diagnosis are in
-  [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md). A second real-model
-  run with the fixes has not been made yet.
+- **Second run, with the fixes** (`--twin ridge --twin-pairs 20 --workers 4`, same world,
+  seed and budget): 80 hypotheses, 20 passed the screen and pooled into 10 features, 5
+  batteries testing 13 evaluator-feature pairs, **6 confirmed, all 6 correct**, no null
+  evaluator given a rule. Recovered planted preferences: the same-gender cue for Evaluators
+  0, 11 and 16 (the men's "male founder" statements pooled onto the female-founder feature
+  with the direction flipped), home-based for Evaluators 3 and 13, paying customers for
+  Evaluator 15; estimates +0.39 to +0.55 against +0.50 planted. The seven rejections were
+  also right. 62 minutes, $8.49. The ten planted preferences still missed were never
+  proposed in a form that survived screening; with five batteries per run, recall is bounded
+  by the proposer. Details in [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md).
 
 ## What the benchmark does not show
 

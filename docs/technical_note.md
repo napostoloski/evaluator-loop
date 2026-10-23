@@ -283,5 +283,10 @@ polarity before the batteries; 30 pairs for the copy, with a ridge-copy option t
 no model calls; offline sanity checks on every rewrite (sections, pronoun consistency,
 unchanged text, commentary) and a verifier call on battery edits. Replayed over the first
 run's rewrites, the checks raise the share of accepted edits that switch the intended
-feature from 71% to 84%, and to 100% for the gender cue. These are the pre-conditions for
-running the AI steps on real applications; a second real-model run has not yet been made.
+feature from 71% to 84%, and to 100% for the gender cue. A second run the same evening with the fixes (ridge screen on the model's rewrites, 20
+pairs, same world and budget) confirmed 6 of 16 planted preferences, all correct, with no
+false confirmations and seven correct rejections, for $8.49 in 62 minutes: the gender cue
+for three evaluators (two of them via pooled, polarity-flipped "male founder" statements),
+home-based for two, paying customers for one. The remaining misses were never proposed in
+a form that survived screening, so with five batteries per run recall is bounded by the
+language-model proposer. Precision across both runs is 7 of 7.

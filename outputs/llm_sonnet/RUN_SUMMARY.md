@@ -137,5 +137,67 @@ polarity of the "man" statements, catches 61 half-edits, and confirms only plant
 preferences (5 of 5 with the stub's few-shot copy, 9 of the 10 reachable ones with the
 ridge copy, no false findings).
 
-A second real-model run with these fixes has not been made. Estimated cost: about $20 with
-`--twin ridge`, $50 to $60 with the few-shot copy at 30 pairs.
+## Second run, with the fixes: `--twin ridge`, 20 pairs, 4 workers (same evening)
+
+```
+python -m evloop llm-demo --base-url https://api.anthropic.com/v1 --model claude-sonnet-5-5 \
+    --temperature -1 --seed 1 --extra-body '{"thinking": {"type": "between_tools"}}' \
+    --twin ridge --twin-pairs 20 --workers 4 --out outputs/llm_sonnet_ridge
+```
+
+Same world, same seed, same budget. The model proposed, rewrote, coded and verified; the
+offline ridge copy screened the model's rewrites; the simulated evaluators re-rated.
+4,219 live calls, 62 minutes, $8.49. Audit trail: `../llm_sonnet_ridge/llm_demo_seed1_audit_trail.csv`;
+pooled groups: `../llm_sonnet_ridge/llm_demo_seed1_groups.json`.
+
+| | first run | second run |
+|---|---|---|
+| Hypotheses proposed | 80 | 80 |
+| Passed the screen | 27 | 20, forming 10 distinct features after pooling |
+| Features given a battery | 5 (all singletons) | 5 (four requested by 2 to 4 evaluators each) |
+| Evaluator-feature tests | 5 | 13 |
+| Confirmed | 1 | 6 |
+| Correct among confirmed | 1 | 6 |
+| Null evaluators given a rule | 0 of 6 | 0 of 6 |
+| Planted preferences recovered | 1 of 16 | 6 of 16 |
+| Cost, time | $21, 3.5 h | $8.49, 62 min |
+
+The six confirmed rules, with the planted value +0.50 in every case:
+
+| evaluator | planted | confirmed statement | estimate | q |
+|---|---|---|---|---|
+| 0 (F) | same-gender cue | led by a female founder, direction + | +0.53 | 0.00005 |
+| 3 (F) | home-based | runs from the founder's home, direction + | +0.55 | 0.003 |
+| 11 (M) | same-gender cue | led by a female founder, direction − | +0.49 | 0.00007 |
+| 13 (M) | penalises home-based | runs from the founder's home, direction − | +0.55 | 0.00001 |
+| 15 (M) | paying customers | pilot with a specific number of paying customers | +0.39 | 0.008 |
+| 16 (M) | same-gender cue | led by a female founder, direction − | +0.55 | 0.0004 |
+
+The seven rejections were also right: Evaluator 0 and 11 on home-based, 13 on the gender
+cue, 5 and 10 on survey counts, 6 on unit economics, and null Evaluator 17 on paying
+customers (estimate −0.04, q = 0.84). Evaluator 3 is the case the walkthrough animation
+describes: her home-based preference was proposed, pooled with three other evaluators'
+wording, and confirmed at +0.55, while the gender cue was not attributed to her.
+
+What the fixes did, visibly: pooling turned 20 differently worded hypotheses into 10
+features and sent four shared ones to batteries, where 13 evaluator-feature pairs were
+tested instead of 5; the polarity step mapped the men's "male founder" statements onto
+the female-founder feature with the direction flipped (Evaluators 11 and 16); the edit
+checks rejected 133 rewrites (88 pronoun switches without a name change, 30 by the
+verifier, 13 unchanged, 2 by the manipulation check) before any re-rating was spent on
+them.
+
+What is still missed, and why: the ten remaining planted preferences were never proposed
+in a form that survived screening. For Evaluators 1, 6 and 10 the proposer offered
+sector or style features instead of the gender cue; for 2 and 12 the sector hypotheses
+were worded as long contrasts and failed the screen; for 4 and 14 (writing fluency)
+nothing close was proposed; for 5 and 6 (paying customers) the proposer offered survey
+counts and unit economics, which are near misses. With five batteries per run and a
+closed budget, recall is bounded by what the proposer puts forward; the offline
+benchmark's proposer chooses from the ten library features and so cannot miss in this
+way. The language-model proposer's open-endedness is the price of being able to find
+features nobody listed, and the obvious next step is to let the pooled vote also admit
+features that only one evaluator requested when budget remains, and to run more seeds.
+
+Precision, which is what a Stage 2 human round depends on, was 6 of 6 here and 1 of 1 in
+the first run.

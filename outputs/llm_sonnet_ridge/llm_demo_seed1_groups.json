@@ -1,0 +1,42 @@
+[
+ {
+  "The application is led by a female founder.": [
+   0,
+   11,
+   13,
+   16
+  ],
+  "The application states that the business currently runs from the founder's home.": [
+   0,
+   3,
+   11,
+   13
+  ],
+  "The venture is a made-to-order clothing brand selling stitched kurtas online.": [
+   1
+  ],
+  "The application includes the unsupported assertion that the team is confident customers will like the product.": [
+   3
+  ],
+  "The venture is a marketplace or business built around hand-made crafts from rural artisans, framed as raising artisan income.": [
+   4
+  ],
+  "The problem section cites a survey, interview, or mapping exercise with a stated sample size of local people or shops as evidence.": [
+   5,
+   10
+  ],
+  "The team section says the founder grew up helping in a family business.": [
+   5
+  ],
+  "The application states concrete per-unit cost and price or fee figures.": [
+   6
+  ],
+  "The venture is a service or technology platform rather than a physical product or food/clothing/furniture business.": [
+   12
+  ],
+  "The application states that a pilot has already been run with a specific number of paying customers.": [
+   15,
+   17
+  ]
+ }
+]
