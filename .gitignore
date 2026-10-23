@@ -7,3 +7,4 @@ llm_calls.jsonl
 *.egg-info/
 llm_calls*.jsonl
 run.log
+outputs/replay_*/

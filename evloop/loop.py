@@ -65,6 +65,15 @@ class LoopConfig:
     het_adjust: bool = False        # allow for real spread of reactions across evaluators in the contrast
     alpha: float = 0.05
     seed: int = 0
+    # which evaluators are tested on a battery feature:
+    #   "proposers": only evaluators whose own hypothesis (after screening) named the feature
+    #   "nominated": also evaluators whose copy predicts a reaction to a feature another evaluator proposed
+    #   "all":       every evaluator, direction read from the estimate (two-sided test)
+    #   "nominated_all": nomination first (it shapes which features get batteries), then every evaluator
+    test_scope: str = "proposers"
+    # with test_scope="all": weight of tests backed by a screened hypothesis relative to tests run
+    # only because the battery data exist (weighted BH; 1.0 = plain BH over all tests)
+    prior_weight: float = 1.0
 
 
 @dataclass
@@ -86,6 +95,7 @@ class Hypothesis:
     battery_apps: int = 0
     accepted: bool = False
     effect: float = float("nan")          # effect used when the rule is subtracted
+    source: str = "proposed"              # "proposed", "nominated" (by the copy) or "panel" (tested without nomination)
 
     @property
     def key(self):
@@ -374,6 +384,15 @@ def contrast(gamma, var, j, idiosyncratic=True, het_adjust=True):
     return float(gamma[j] - ref), float(np.sqrt(max(var[j] + v_ref + tau2, 1e-12)))
 
 
+def weighted_bh(pvals, weights):
+    """Weighted Benjamini-Hochberg (Genovese, Roeder & Wasserman, 2006): BH applied to p/w with
+    weights rescaled to mean 1, which keeps false-discovery control while favouring tests that
+    had prior support."""
+    w = np.asarray(weights, dtype=float)
+    w = w * len(w) / w.sum()
+    return np.minimum(bh(np.asarray(pvals, dtype=float) / w), 1.0)
+
+
 def bh(pvals):
     """Benjamini-Hochberg adjusted p-values (q-values)."""
     p = np.asarray(pvals, dtype=float)
@@ -438,12 +457,13 @@ def run_panel(world, backend, cfg: LoopConfig) -> dict:
 
     rounds = 1 if cfg.confirm == "none" else cfg.max_rounds
     for rnd in range(1, rounds + 1):
-        cands, new_rules = {}, {}
+        cands, new_rules, resids = {}, {}, {}
         for j in range(E):
             if j in done:
                 continue
             ev_rng = np.random.default_rng(cfg.seed * 1000 + 100 * rnd + j)
             resid, _ = consensus_residual(world.scores, j, adjust[j])
+            resids[j] = resid
             hyps = backend.propose(j, resid, excluded[j], cfg, ev_rng, rnd)
             if not hyps:
                 done.add(j)
@@ -467,6 +487,31 @@ def run_panel(world, backend, cfg: LoopConfig) -> dict:
         if cfg.confirm in ("panel", "total") and cands and hasattr(backend, "canonicalize"):
             backend.canonicalize(cands)      # pool the same feature stated in different words
             cands = {j: hs for j, hs in cands.items() if hs}
+        if cfg.confirm in ("panel", "total") and cands and cfg.test_scope in ("nominated", "nominated_all"):
+            # screen every pooled feature for every evaluator who did not propose it; the copy's
+            # prediction sets the direction, and a pass makes the evaluator a candidate
+            pooled = {}
+            for hs in cands.values():
+                for h in hs:
+                    pooled.setdefault(h.feature, h.description)
+            for j in resids:
+                own = {h.feature for h in cands.get(j, [])}
+                todo = [f for f in pooled if f not in own and f not in excluded[j]]
+                if not todo:
+                    continue
+                nom_rng = np.random.default_rng(cfg.seed * 1000 + 100 * rnd + j + 50_000)
+                hs = [Hypothesis(f, 1, float("nan"), [], rnd, description=pooled[f], source="nominated") for f in todo]
+                backend.screen(j, resids[j], hs, cfg, nom_rng)
+                for h in hs:
+                    if h.twin_effect < 0:
+                        h.target, h.twin_effect = 0, -h.twin_effect
+                        h.twin_ci = tuple(sorted((-h.twin_ci[0], -h.twin_ci[1])))
+                    h.twin_pass = bool(h.twin_ci[0] > 0 and h.twin_effect >= cfg.min_twin_effect)
+                passing = [h for h in hs if h.twin_pass]
+                res[j].trail.extend(passing)
+                excluded[j].update(h.feature for h in hs if not h.twin_pass)
+                if passing:
+                    cands.setdefault(j, []).extend(passing)
         if cfg.confirm in ("panel", "total") and cands:
             votes, desc = {}, {}
             for j, hs in cands.items():
@@ -493,9 +538,32 @@ def run_panel(world, backend, cfg: LoopConfig) -> dict:
                     h.human_p = float(2 * stats.t.sf(abs(est / se), df[j]))
                     all_tested.append((j, h))
                 excluded[j].update(h.feature for h in tested)
+            if cfg.test_scope in ("all", "nominated_all"):
+                # test every evaluator on every battery feature they were not already tested on
+                for j in range(E):
+                    seen = {h.feature for h in res[j].trail if h.tested} | {f for f, _, _ in res[j].accepted}
+                    for f in batteries:
+                        if f in seen or f in {h.feature for _, h in all_tested if _ == j}:
+                            continue
+                        gamma, var, df, used = batteries[f]
+                        est, se = contrast(gamma, var, j, idiosyncratic=(cfg.confirm == "panel"), het_adjust=cfg.het_adjust)
+                        h = Hypothesis(f, int(est >= 0), float("nan"), [], rnd,
+                                       description=desc.get(f, getattr(backend, "descriptions", {}).get(f, f)),
+                                       source="panel")
+                        h.tested, h.battery_apps = True, len(used)
+                        h.human_effect, h.human_se = abs(est), se
+                        h.human_p = float(2 * stats.t.sf(abs(est / se), df[j]))
+                        res[j].trail.append(h)
+                        all_tested.append((j, h))
+                        excluded[j].add(f)
             if all_tested:
                 # false discovery rate controlled across every test in the round, panel-wide
-                for (j, h), q in zip(all_tested, bh([h.human_p for _, h in all_tested])):
+                ps = [h.human_p for _, h in all_tested]
+                if cfg.prior_weight != 1.0 and any(h.source == "panel" for _, h in all_tested):
+                    qs = weighted_bh(ps, [1.0 if h.source == "panel" else cfg.prior_weight for _, h in all_tested])
+                else:
+                    qs = bh(ps)
+                for (j, h), q in zip(all_tested, qs):
                     h.human_q = float(q)
                     h.accepted = bool(q < cfg.alpha and h.human_effect >= cfg.min_effect)
                     if h.accepted:

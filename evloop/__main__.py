@@ -86,7 +86,8 @@ def cmd_llm_demo(a):
     backend = LLMBackend(client, world, n_twin_pairs=a.twin_pairs, twin=a.twin, verify=not a.no_verify_edits,
                          workers=a.workers)
     k, budget = _design(a.battery_apps)
-    cfg = LoopConfig(seed=a.seed, battery_apps=a.battery_apps, battery_features=k, budget=budget, max_rounds=a.rounds)
+    cfg = LoopConfig(seed=a.seed, battery_apps=a.battery_apps, battery_features=k, budget=budget, max_rounds=a.rounds,
+                     test_scope=a.test_scope, het_adjust=a.het_adjust, prior_weight=a.prior_weight)
     results = run_panel(world, backend, cfg)
     texts = [x.text for x in apps]
     truth = {op.name: np.array([detect(op.name, t) == 1 for t in texts], dtype=float) for op in OPERATORS}
@@ -231,6 +232,11 @@ def main():
     l.add_argument("--twin-pairs", type=int, default=30, help="edited pairs per hypothesis for the screen")
     l.add_argument("--no-verify-edits", action="store_true", help="skip the verifier call on battery edits")
     l.add_argument("--workers", type=int, default=4, help="concurrent model calls during screening")
+    l.add_argument("--test-scope", choices=["proposers", "nominated", "all", "nominated_all"], default="proposers",
+                   help="which evaluators are tested on a battery feature (see LoopConfig.test_scope)")
+    l.add_argument("--het-adjust", action="store_true", help="allow for real spread of reactions across evaluators")
+    l.add_argument("--prior-weight", type=float, default=1.0,
+                   help="with --test-scope all: weighted-BH weight of screened hypotheses relative to unscreened tests")
     l.add_argument("--extra-body", default=None,
                    help='JSON merged into every request, e.g. \'{"thinking": {"type": "between_tools"}}\' for Claude')
     l.add_argument("--out", default="outputs/llm"); l.set_defaults(f=cmd_llm_demo)
