@@ -175,22 +175,31 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         data = json.dumps(req).encode()
         delay = 2.0
-        for attempt in range(self.retries + 1):
+        # transient statuses: rate limits, server errors and 529 (provider overloaded); these get
+        # more attempts and longer waits than other failures, and honour a Retry-After header
+        transient = (408, 429, 500, 502, 503, 504, 529)
+        attempts = max(self.retries, 8)
+        for attempt in range(attempts + 1):
             t0 = time.time()
+            wait = delay
             try:
                 r = urllib.request.Request(self.base_url + "/chat/completions", data=data,
                                            headers=headers, method="POST")
                 with urllib.request.urlopen(r, timeout=self.timeout) as resp:
                     return json.loads(resp.read().decode()), round(time.time() - t0, 3)
             except urllib.error.HTTPError as e:
-                if e.code not in (408, 429, 500, 502, 503, 504) or attempt == self.retries:
+                if e.code not in transient or attempt == attempts:
                     raise
+                try:
+                    wait = max(wait, float(e.headers.get("retry-after", 0)))
+                except (TypeError, ValueError):
+                    pass
             except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected,
                     ConnectionResetError, json.JSONDecodeError):
-                if attempt == self.retries:
+                if attempt >= self.retries:
                     raise
-            time.sleep(delay)
-            delay *= 2
+            time.sleep(min(wait, 120.0) * (0.75 + 0.5 * np.random.random()))
+            delay = min(delay * 2, 120.0)
 
 
 # ---------------------------------------------------------------------------
