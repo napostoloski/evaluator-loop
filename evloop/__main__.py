@@ -84,9 +84,10 @@ def cmd_llm_demo(a):
                        max_tokens_field=a.max_tokens_field, extra_headers=headers,
                        cache_dir=os.path.join(a.out, "llm_cache"), log_path=os.path.join(a.out, "llm_calls.jsonl"))
     backend = LLMBackend(client, world, n_twin_pairs=a.twin_pairs, twin=a.twin, verify=not a.no_verify_edits,
-                         workers=a.workers)
+                         workers=a.workers, proposer_prompt=a.proposer_prompt, n_examples=a.examples)
     k, budget = _design(a.battery_apps)
     cfg = LoopConfig(seed=a.seed, battery_apps=a.battery_apps, battery_features=k, budget=budget, max_rounds=a.rounds,
+                     max_hypotheses=a.hypotheses,
                      test_scope=a.test_scope, het_adjust=a.het_adjust, prior_weight=a.prior_weight)
     results = run_panel(world, backend, cfg)
     texts = [x.text for x in apps]
@@ -235,6 +236,10 @@ def main():
     l.add_argument("--test-scope", choices=["proposers", "nominated", "all", "nominated_all"], default="proposers",
                    help="which evaluators are tested on a battery feature (see LoopConfig.test_scope)")
     l.add_argument("--het-adjust", action="store_true", help="allow for real spread of reactions across evaluators")
+    l.add_argument("--proposer-prompt", choices=["v1", "v2"], default="v1",
+                   help="v2: dimension checklist (founder, venture, evidence, writing), distinct hypotheses")
+    l.add_argument("--hypotheses", type=int, default=4, help="hypotheses per evaluator per round")
+    l.add_argument("--examples", type=int, default=8, help="over- and under-rated applications shown to the proposer, per side")
     l.add_argument("--prior-weight", type=float, default=1.0,
                    help="with --test-scope all: weighted-BH weight of screened hypotheses relative to unscreened tests")
     l.add_argument("--extra-body", default=None,

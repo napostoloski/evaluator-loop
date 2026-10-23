@@ -213,6 +213,18 @@ GROUP A (over-rated by this evaluator)
 GROUP B (under-rated by this evaluator)
 {group_b}"""
 
+PROPOSE_USER_V2 = """One evaluator scored the applications below. Group A received much HIGHER scores from this evaluator than the other evaluators gave them. Group B received much LOWER scores than the other evaluators gave them.
+
+Propose {k} DISTINCT hypotheses about features of the application TEXT that could explain why this evaluator scores Group A above Group B. Compare the groups systematically along each of these dimensions before proposing: (1) the founder: gender, name, background, education, experience, team; (2) the venture: sector, product, location, how and where it operates; (3) the evidence offered: customers, pilots, numbers, research; (4) the writing: fluency, grammar, punctuation, polish. Prefer features that are clearly more common in one group than the other. Each feature must be something that could be added to or removed from an application by a small edit, and must name ONE concrete, checkable property, not a list of alternatives. Do not propose the same feature twice in different words. Avoid features that simply restate overall quality.
+{excluded}
+Return only a JSON list, with no other text. Each element: {{"feature": "<short snake_case name>", "description": "<one sentence stating the feature as a property an application has>", "direction": "higher" or "lower"}}. Use "higher" if the evaluator rewards applications that have the feature and "lower" if the evaluator penalises them.
+
+GROUP A (over-rated by this evaluator)
+{group_a}
+
+GROUP B (under-rated by this evaluator)
+{group_b}"""
+
 _DIR_UP = {"higher", "high", "up", "positive", "rewards", "reward", "+"}
 _DIR_DOWN = {"lower", "low", "down", "negative", "penalises", "penalizes", "penalise", "penalize", "-"}
 
@@ -225,7 +237,7 @@ def _valid_proposals(text):
 
 
 def propose_llm(client: LLMClient, texts: list, resid: np.ndarray, k: int = 4,
-                n_examples: int = 8, excluded: list | None = None, max_chars: int = 2500):
+                n_examples: int = 8, excluded: list | None = None, max_chars: int = 2500, prompt: str = "v1"):
     order = np.argsort(resid)
     hi = [texts[i][:max_chars] for i in order[::-1][:n_examples]]
     lo = [texts[i][:max_chars] for i in order[:n_examples]]
@@ -234,9 +246,10 @@ def propose_llm(client: LLMClient, texts: list, resid: np.ndarray, k: int = 4,
     if excluded:
         ex = "Do not propose these features, which were already considered: " + "; ".join(excluded) + "\n"
     msg = [{"role": "system", "content": PROPOSE_SYSTEM},
-           {"role": "user", "content": PROPOSE_USER.format(k=k, excluded=ex, group_a=fmt(hi), group_b=fmt(lo))}]
+           {"role": "user", "content": (PROPOSE_USER_V2 if prompt == "v2" else PROPOSE_USER).format(
+               k=k, excluded=ex, group_a=fmt(hi), group_b=fmt(lo))}]
     try:
-        out = _json_block(client.chat(msg, max_tokens=1200, validate=_valid_proposals))
+        out = _json_block(client.chat(msg, max_tokens=1200 if prompt == "v1" else 1800, validate=_valid_proposals))
     except ValueError:
         return []
     hyps = []
@@ -539,8 +552,11 @@ class LLMBackend:
     """
 
     def __init__(self, client: LLMClient, world, n_shots: int = 12, n_twin_pairs: int = 30,
-                 min_similarity: float = 0.6, twin: str = "llm", verify: bool = True, workers: int = 4, log=print):
+                 min_similarity: float = 0.6, twin: str = "llm", verify: bool = True, workers: int = 4,
+                 proposer_prompt: str = "v1", n_examples: int = 8, log=print):
         self.client = client
+        self.proposer_prompt = proposer_prompt
+        self.n_examples = n_examples
         self.workers = max(1, workers)
         self._lock = threading.Lock()
         self.world = world
@@ -568,7 +584,8 @@ class LLMBackend:
 
     def propose(self, j, resid, excluded, cfg, rng, rnd):
         ex = [self.descriptions.get(f, f) for f in excluded]
-        raw = propose_llm(self.client, self.texts, resid, k=cfg.max_hypotheses, excluded=ex)
+        raw = propose_llm(self.client, self.texts, resid, k=cfg.max_hypotheses, excluded=ex,
+                          n_examples=self.n_examples, prompt=self.proposer_prompt)
         hyps = []
         for h in raw:
             key = self._key(h["description"])

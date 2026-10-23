@@ -410,14 +410,45 @@ def bh(pvals):
 # ---------------------------------------------------------------------------
 # The loop over the panel
 # ---------------------------------------------------------------------------
-class OfflineBackend:
-    """Proposer, twin, editor and coder for the offline benchmark."""
+def propose_coded(space: TextSpace, resid, excluded, cfg: LoopConfig, rnd: int, p_max: float = 0.2,
+                  features=None):
+    """Proposer that ranks coded candidate features by their joint association with the
+    evaluator's residual: OLS of the residual on all candidates at once (HC1 errors), so
+    correlated candidates (e.g. founder gender and sector) compete. Keeps up to
+    cfg.max_hypotheses candidates with p < p_max, ordered by |t|. Offline the candidates are
+    the edit library, coded with error; with an LLM they are the pooled proposals."""
+    feats = [f for f in (features or [op.name for op in OPERATORS]) if f not in excluded]
+    if not feats:
+        return []
+    cols = [np.array([0.5 if x is None else float(x) for x in space.coded[f]]) for f in feats]
+    Z = np.column_stack([np.ones(len(resid))] + cols)
+    beta, p = _robust_ols(Z, resid)
+    hyps = []
+    for f, b, pp in zip(feats, beta[1:], p[1:]):
+        if pp < p_max:
+            t = abs(stats.t.isf(pp / 2, len(resid) - Z.shape[1]))
+            hyps.append(Hypothesis(f, int(b > 0), float(t), [f"coded:{f}"], rnd))
+    hyps.sort(key=lambda h: -h.proposer_score)
+    return hyps[:cfg.max_hypotheses]
 
-    def __init__(self, space: TextSpace):
+
+class OfflineBackend:
+    """Proposer, twin, editor and coder for the offline benchmark.
+
+    proposer="text": stability-selected lasso on the text, mapped to library edits (default).
+    proposer="coded": joint regression on the coded library features (see propose_coded).
+    """
+
+    def __init__(self, space: TextSpace, proposer: str = "text", p_max: float = 0.2):
         self.space = space
+        self.proposer = proposer
+        self.p_max = p_max
 
     def propose(self, j, resid, excluded, cfg, rng, rnd):
-        hyps = propose_offline(self.space, resid, excluded, cfg, rng, rnd)
+        if self.proposer == "coded":
+            hyps = propose_coded(self.space, resid, excluded, cfg, rnd, p_max=self.p_max)
+        else:
+            hyps = propose_offline(self.space, resid, excluded, cfg, rng, rnd)
         for h in hyps:
             h.description = OPS[h.feature].description
         return hyps
