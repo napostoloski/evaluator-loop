@@ -292,6 +292,15 @@ class RidgeTwin:
         effs = np.array([(m.predict(Xt) - m.predict(Xo)).mean() for m in self.models])
         return float(effs.mean()), (float(np.quantile(effs, 0.025)), float(np.quantile(effs, 0.975)))
 
+    def edit_effect_texts(self, space, texts_with, texts_without):
+        """Predicted effect of arbitrary edited texts (e.g. an LLM's rewrites): mean over the
+        pairs of predicted deviation with the feature minus without, with the bootstrap range."""
+        if len(texts_with) < 2:
+            return float("nan"), (float("nan"), float("nan"))
+        Xa, Xb = space.transform(texts_with), space.transform(texts_without)
+        effs = np.array([(m.predict(Xa) - m.predict(Xb)).mean() for m in self.models])
+        return float(effs.mean()), (float(np.quantile(effs, 0.025)), float(np.quantile(effs, 0.975)))
+
 
 # ---------------------------------------------------------------------------
 # Confirmation: counterbalanced edited battery
@@ -455,6 +464,9 @@ def run_panel(world, backend, cfg: LoopConfig) -> dict:
                 if passing:
                     cands[j] = passing
 
+        if cfg.confirm in ("panel", "total") and cands and hasattr(backend, "canonicalize"):
+            backend.canonicalize(cands)      # pool the same feature stated in different words
+            cands = {j: hs for j, hs in cands.items() if hs}
         if cfg.confirm in ("panel", "total") and cands:
             votes, desc = {}, {}
             for j, hs in cands.items():

@@ -159,6 +159,10 @@ served by vLLM. Other servers may ignore it. Reasoning blocks are stripped from 
 If a model spends its whole token limit reasoning, the client stops with an error rather than
 continuing silently.
 
+Useful flags: `--twin ridge` (screen with the offline ridge copy on the model's edits, no
+twin calls), `--twin-pairs 30` (edited pairs per hypothesis), `--no-verify-edits` (skip
+the verifier call on battery edits), `--extra-body '<json>'` (merged into every request).
+
 Commercial endpoints work the same way (set `EVLOOP_API_KEY`). For models that reject
 `temperature` or `max_tokens`, pass `--temperature -1 --max-tokens-field max_completion_tokens`.
 `--temperature` and `--top-p` set sampling. Replies are cached, so runs stay reproducible at
@@ -188,9 +192,26 @@ the simulated evaluators re-rated the edits as in the benchmark.
   hypotheses were never tested; the language-model copy, predicting from 10 pairs, is
   noisier than the ridge copy; and the rewrites were often half-edits (pronouns switched,
   name kept) that the checks let through.
-- All three have mechanical fixes, listed in
-  [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md) with the
-  audit trail. The stub-server tests (`tests/stub_server.py`) remain the plumbing check.
+- All three are now fixed in the code, and tested without further model calls:
+  - **Pooling.** After screening, one model call groups the passing hypotheses into
+    distinct features with a canonical wording and a polarity, so "the founder is a
+    man" and "the founder is a woman" share a battery with opposite directions.
+  - **Screening.** 30 edited pairs per hypothesis instead of 10, built from one rewrite
+    per application rather than two. `--twin ridge` screens the model's edits with the
+    offline ridge copy instead of a few-shot model copy, which removes the most expensive
+    calls (about 40% of the first run) and, in the benchmark, is the more reliable filter.
+  - **Edits.** Free checks reject rewrites that change the sections, mix pronouns, switch
+    pronouns without the name, or come back unchanged, and strip appended commentary.
+    Battery edits also pass a verifier call that compares original and rewrite.
+    `python -m evloop audit-edits --log outputs/llm_sonnet/llm_calls.jsonl` replays
+    these checks over the first run's 1,822 rewrites: among rewrites where a change was
+    needed, the old checks accepted 463 of 465 and 71% of those switched the detector;
+    the new checks accept 393 and 84% switch it (gender edits: 100%, up from 51%).
+  - On the stub server, the full demo now pools the shared feature across evaluators and
+    confirms only planted preferences (9 of the 10 it can reach, no false findings).
+  The first run's numbers and the diagnosis are in
+  [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md). A second real-model
+  run with the fixes has not been made yet.
 
 ## What the benchmark does not show
 

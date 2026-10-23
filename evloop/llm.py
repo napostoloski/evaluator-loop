@@ -196,7 +196,7 @@ PROPOSE_SYSTEM = (
 
 PROPOSE_USER = """One evaluator scored the applications below. Group A received much HIGHER scores from this evaluator than the other evaluators gave them. Group B received much LOWER scores than the other evaluators gave them.
 
-Propose up to {k} hypotheses about features of the application TEXT that could explain why this evaluator scores Group A above Group B. Each feature must be something that could be added to or removed from an application by a small edit (for example a phrase, a fact about the founder, a property of the venture, or the writing style). Avoid features that simply restate overall quality.
+Propose up to {k} hypotheses about features of the application TEXT that could explain why this evaluator scores Group A above Group B. Each feature must be something that could be added to or removed from an application by a small edit (for example a phrase, a fact about the founder, a property of the venture, or the writing style). Each hypothesis must name ONE concrete, checkable property, not a list of alternatives joined by "or" and not a contrast with several other categories. Avoid features that simply restate overall quality.
 {excluded}
 Return only a JSON list, with no other text. Each element: {{"feature": "<short snake_case name>", "description": "<one sentence stating the feature as a property an application has>", "direction": "higher" or "lower"}}. Use "higher" if the evaluator rewards applications that have the feature and "lower" if the evaluator penalises them.
 
@@ -266,16 +266,66 @@ class EditResult:
     text: str
     similarity: float
     ok: bool
+    reason: str = ""
+
+
+_HEADING_RE = re.compile(r"(?m)^([A-Z][A-Za-z /&]{1,40}:)")
+# commentary a model may append to or wrap around a rewrite
+_COMMENT_RE = re.compile(
+    r"(?:^|\n|(?<=[.!?])\s+)(?:Wait\b|Hmm\b|Note:|Notes?:|Explanation:|Here is\b|Here's\b|Rewritten application\b|"
+    r"I (?:have|changed|kept|left|will|would|cannot|can't|need|also)\b|The statement (?:is|was) already\b|"
+    r"No changes? (?:is |are |was |were )?(?:needed|required|made)\b|\(unchanged\)|\*\*Note)", re.I)
+
+
+def _headings(text: str) -> list:
+    return _HEADING_RE.findall(text)
 
 
 def _clean_rewrite(new: str, original: str) -> str:
+    """Strip reasoning, code fences, preambles and trailing commentary from a rewrite."""
     new = strip_think(new)
     new = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", new.strip())
-    first_heading = original.split(":", 1)[0] + ":"
+    heads = _headings(original)
+    first_heading = heads[0] if heads else original.split(":", 1)[0] + ":"
     pos = new.find(first_heading)
     if pos > 0:  # drop any preamble before the first section heading
         new = new[pos:]
+    m = _COMMENT_RE.search(new)
+    if m:        # cut at the first commentary marker; if that removes sections, the sanity check rejects it
+        new = new[:m.start()]
     return new.strip()
+
+
+_FEM_RE = re.compile(r"\b(she|her|hers|herself)\b", re.I)
+_MASC_RE = re.compile(r"\b(he|him|his|himself)\b", re.I)
+
+
+_CAP_STOP = {"She", "He", "Her", "His", "Him", "Hers", "They", "Them", "Their", "The", "We", "Our", "Us", "It", "Its",
+             "This", "That", "These", "Those", "In", "At", "On", "For", "With", "And", "But", "Or", "If", "As", "By",
+             "To", "From", "Of", "So", "Yet", "Also", "Since", "After", "Before", "Team", "Problem", "Target", "Business"}
+
+
+def _proper_nouns(text: str) -> set:
+    """Capitalised words that are plausibly names: sentence-initial pronouns and function words
+    are excluded, so that switching 'He' to 'She' does not count as a name change."""
+    return {w for w in re.findall(r"\b[A-Z][a-z]{2,}\b", text) if w not in _CAP_STOP}
+
+
+def edit_sanity(original: str, new: str) -> tuple:
+    """Free checks on a rewrite: same sections in the same order, no mixed pronouns introduced,
+    and a pronoun change must come with a name change. Returns (ok, reason)."""
+    if not new:
+        return False, "empty"
+    ho, hn = _headings(original), _headings(new)
+    if ho and hn != ho:
+        return False, "sections"
+    fo, mo = bool(_FEM_RE.search(original)), bool(_MASC_RE.search(original))
+    fn, mn = bool(_FEM_RE.search(new)), bool(_MASC_RE.search(new))
+    if fn and mn and not (fo and mo):
+        return False, "mixed_pronouns"
+    if (fn, mn) != (fo, mo) and _proper_nouns(new) == _proper_nouns(original):
+        return False, "pronouns_without_name"
+    return True, ""
 
 
 def word_similarity(a: str, b: str) -> float:
@@ -288,7 +338,10 @@ def edit_llm(client: LLMClient, text: str, description: str, present: bool,
         truth="TRUE" if present else "FALSE", description=description, text=text)}]
     new = _clean_rewrite(client.chat(msg, max_tokens=1600, validate=lambda t: len(t) > 0.5 * len(text)), text)
     sim = word_similarity(text, new)
-    return EditResult(new, sim, sim >= min_similarity)
+    ok, reason = edit_sanity(text, new)
+    if ok and sim < min_similarity:
+        ok, reason = False, "similarity"
+    return EditResult(new, sim, ok, reason)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +364,106 @@ def code_llm(client: LLMClient, text: str, description: str) -> int:
     reply = client.chat([{"role": "user", "content": CODE_USER.format(description=description, text=text)}],
                         max_tokens=40, validate=lambda t: _yes_no(t) in ("yes", "no"))
     return int(_yes_no(reply) == "yes")
+
+
+# ---------------------------------------------------------------------------
+# Verifier: is a rewrite minimal, complete and free of contradictions?
+# ---------------------------------------------------------------------------
+VERIFY_USER = """Compare the ORIGINAL and the REWRITTEN startup application. The rewrite was supposed to change the application only so that this statement becomes {truth}:
+
+"{description}"
+
+Answer yes only if all of the following hold: (1) the statement is now {truth} in the rewrite; (2) nothing else of substance changed; (3) the rewrite contains no commentary, notes or explanations; (4) the rewrite has no internal contradiction, such as a name and pronouns of different genders. Begin your reply with the single word yes or no, then one short reason.
+
+ORIGINAL
+{original}
+
+REWRITTEN
+{new}"""
+
+
+def verify_edit_llm(client: LLMClient, original: str, new: str, description: str, present: bool) -> bool:
+    msg = [{"role": "user", "content": VERIFY_USER.format(
+        truth="TRUE" if present else "FALSE", description=description, original=original, new=new)}]
+    reply = client.chat(msg, max_tokens=60, validate=lambda t: _yes_no(t) in ("yes", "no"))
+    return _yes_no(reply) == "yes"
+
+
+# ---------------------------------------------------------------------------
+# Canonicaliser: merge hypotheses that state the same feature in different words
+# ---------------------------------------------------------------------------
+CANON_USER = """Below are hypotheses about features of startup applications, each a one-sentence statement, proposed separately for different evaluators. Group the statements that describe the SAME feature, even if worded differently or stated as opposites (for example "the founder is a woman" and "the founder is a man" describe the same feature with opposite polarity). Statements about genuinely different features stay in different groups.
+
+Return only a JSON list of groups. Each group: {{"canonical": "<one sentence stating the feature as a property an application has>", "members": [{{"id": <id>, "polarity": "same" or "opposite"}}, ...]}}. "opposite" means the member statement is the negation of the canonical statement. Every id must appear in exactly one group.
+
+STATEMENTS
+{items}"""
+
+_STOP = set(("the a an of or and in to for with is are has have that than rather as by on at from its their it this such e g "
+             "application applications states state stated section team founder founders describes described venture "
+             "mentions mentioned mention reports includes text currently being holds holding rather lead led").split())
+
+
+def _content_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if w not in _STOP and len(w) > 2}
+
+
+def canonicalize_offline(descriptions: list, threshold: float = 0.4) -> list:
+    """Fallback grouping by word overlap (Jaccard). Cannot detect opposites. Returns, per
+    input, (canonical description, flip) with flip always False."""
+    groups = []     # list of (words, canonical, [ids])
+    out = [None] * len(descriptions)
+    for i, d in enumerate(descriptions):
+        w = _content_words(d)
+        best, best_j = 0.0, None
+        for gi, (gw, _, _) in enumerate(groups):
+            j = len(w & gw) / max(len(w | gw), 1)
+            if j > best:
+                best, best_j = j, gi
+        if best_j is not None and best >= threshold:
+            groups[best_j][2].append(i)
+            out[i] = (groups[best_j][1], False)
+        else:
+            groups.append((w, d, [i]))
+            out[i] = (d, False)
+    return out
+
+
+def canonicalize_llm(client: LLMClient, descriptions: list) -> list:
+    """Ask the model to group equivalent statements. Returns, per input, (canonical
+    description, flip) where flip means the input is the negation of the canonical."""
+    if len(descriptions) <= 1:
+        return [(d, False) for d in descriptions]
+    items = "\n".join(f"{i}: {d}" for i, d in enumerate(descriptions))
+    msg = [{"role": "user", "content": CANON_USER.format(items=items)}]
+
+    def valid(t):
+        try:
+            groups = _json_block(t)
+        except ValueError:
+            return False
+        ids = [m.get("id") for g in groups if isinstance(g, dict) for m in g.get("members", []) if isinstance(m, dict)]
+        return len(ids) > 0 and len(ids) == len(set(ids))
+
+    try:
+        groups = _json_block(client.chat(msg, max_tokens=2000, validate=valid))
+    except ValueError:
+        return canonicalize_offline(descriptions)
+    out = [None] * len(descriptions)
+    for g in groups:
+        if not isinstance(g, dict) or not g.get("members"):
+            continue
+        canon = str(g.get("canonical", "")).strip()
+        for m in g["members"]:
+            try:
+                i = int(m.get("id"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0 <= i < len(descriptions) and out[i] is None:
+                flip = str(m.get("polarity", "same")).strip().lower().startswith("opp")
+                out[i] = (canon or descriptions[i], flip)
+    fallback = canonicalize_offline(descriptions)
+    return [o if o is not None else fallback[i] for i, o in enumerate(out)]
 
 
 # ---------------------------------------------------------------------------
@@ -367,30 +520,43 @@ class LLMTwin:
 class LLMBackend:
     """LLM proposer, twin, editor and coder, with the same interface as loop.OfflineBackend.
 
-    Edits that drift too far from the original (word-level similarity below
-    min_similarity) or fail a manipulation check (the coder does not read the intended value
-    in the edited text) are dropped before any real query is spent on them.
+    Edits that fail the offline sanity checks (sections changed, pronouns mixed, pronouns
+    changed without the name, too dissimilar) are dropped before any query is spent on
+    them. Battery edits are additionally checked by the coder (the intended value must now
+    read in the text) and, with verify=True, by a verifier call that compares original and
+    rewrite. Hypotheses that passed screening are canonicalised across the panel before the
+    batteries, so that the same feature stated in different words is pooled.
+
+    twin="llm" uses a few-shot copy of the evaluator; twin="ridge" screens the LLM's edits
+    with the ridge text copy from the offline benchmark, which needs no model calls.
     """
 
-    def __init__(self, client: LLMClient, world, n_shots: int = 12, n_twin_pairs: int = 10,
-                 min_similarity: float = 0.6, log=print):
+    def __init__(self, client: LLMClient, world, n_shots: int = 12, n_twin_pairs: int = 30,
+                 min_similarity: float = 0.6, twin: str = "llm", verify: bool = True, log=print):
         self.client = client
         self.world = world
         self.texts = [a.text for a in world.apps]
         self.n_shots = n_shots
         self.n_twin_pairs = n_twin_pairs
         self.min_similarity = min_similarity
+        self.twin_mode = twin
+        self.verify = verify
         self.descriptions = {}
         self.log = log
         self.dropped_edits = 0
+        self.drop_reasons = {}
+        self.groups = []            # canonical groups formed in each round (for the audit trail)
+        self._space = None
 
     @staticmethod
     def _key(description):
         return re.sub(r"[^a-z0-9]+", " ", description.lower()).strip()
 
+    def _drop(self, reason):
+        self.dropped_edits += 1
+        self.drop_reasons[reason] = self.drop_reasons.get(reason, 0) + 1
+
     def propose(self, j, resid, excluded, cfg, rng, rnd):
-        # features are keyed by their (normalised) description, so two evaluators' hypotheses are
-        # pooled into one battery only if they state the same feature; synonyms are not merged
         ex = [self.descriptions.get(f, f) for f in excluded]
         raw = propose_llm(self.client, self.texts, resid, k=cfg.max_hypotheses, excluded=ex)
         hyps = []
@@ -404,33 +570,90 @@ class LLMBackend:
         return hyps
 
     def _edit_pair(self, i, description):
-        a = edit_llm(self.client, self.texts[i], description, True, self.min_similarity)
-        b = edit_llm(self.client, self.texts[i], description, False, self.min_similarity)
-        if not (a.ok and b.ok):
-            self.dropped_edits += 1
+        """(text with the feature, text without it) for one application: the original and one
+        rewrite in the opposite direction. The coder decides the original's state, so only one
+        rewrite is needed, and a rewrite that comes back unchanged is dropped."""
+        text = self.texts[i]
+        has = code_llm(self.client, text, description)
+        e = edit_llm(self.client, text, description, present=not has, min_similarity=self.min_similarity)
+        if not e.ok:
+            self._drop(e.reason)
             return None
-        return a.text, b.text
+        if e.text.strip() == text.strip():
+            self._drop("unchanged")
+            return None
+        return (text, e.text) if has else (e.text, text)
+
+    def _ridge_space(self, cfg):
+        if self._space is None:
+            from .loop import TextSpace
+            self._space = TextSpace(self.world.apps, seed=cfg.seed, coder_error=cfg.coder_error)
+        return self._space
 
     def screen(self, j, resid, hyps, cfg, rng):
-        # contrasting examples: the applications this evaluator most over- and under-rates
         order = np.argsort(resid)
         shots = np.concatenate([order[: self.n_shots // 2], order[::-1][: self.n_shots - self.n_shots // 2]])
         held = np.array([i for i in rng.permutation(len(self.texts)) if i not in set(shots)])
-        twin = LLMTwin(self.client, [(self.texts[i], float(resid[i])) for i in shots])
+        if self.twin_mode == "ridge":
+            from .loop import RidgeTwin
+            ridge = RidgeTwin(self._ridge_space(cfg), resid, cfg, rng)
+            twin_effect = lambda pairs: ridge.edit_effect_texts(self._space, [a for a, _ in pairs], [b for _, b in pairs])
+        else:
+            llm_twin = LLMTwin(self.client, [(self.texts[i], float(resid[i])) for i in shots])
+            twin_effect = llm_twin.edit_effect
         for h in hyps:
             pairs = [p for p in (self._edit_pair(int(i), h.description) for i in held[: self.n_twin_pairs]) if p]
-            eff, ci = twin.edit_effect(pairs)
+            eff, ci = twin_effect(pairs)
             sign = 1.0 if h.target == 1 else -1.0
             h.twin_effect = sign * eff
             h.twin_ci = tuple(sorted((sign * ci[0], sign * ci[1])))
-            self.log(f"evaluator {j} round {h.round}: {h.feature} twin effect {h.twin_effect:+.2f}")
+            self.log(f"evaluator {j} round {h.round}: {h.feature} twin effect {h.twin_effect:+.2f} ({len(pairs)} pairs)")
+
+    def canonicalize(self, cands: dict):
+        """Pool hypotheses that state the same feature across evaluators. Rewrites each
+        hypothesis's feature key, description and (if its statement is the negation of the
+        canonical one) its target. Drops duplicate features within one evaluator, keeping
+        the one with the larger predicted effect."""
+        items = [(j, h) for j, hs in cands.items() for h in hs]
+        if len(items) <= 1:
+            return
+        mapping = canonicalize_llm(self.client, [h.description for _, h in items])
+        for (j, h), (canon, flip) in zip(items, mapping):
+            key = self._key(canon) or h.feature
+            if key != h.feature:
+                self.descriptions.setdefault(key, canon)
+                h.feature, h.description = key, self.descriptions[key]
+            if flip:
+                h.target = 1 - h.target
+        groups = {}
+        for j, h in items:
+            groups.setdefault(h.feature, []).append(j)
+        self.groups.append({k: sorted(set(v)) for k, v in groups.items()})
+        for k, js in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            if len(js) > 1:
+                self.log(f"pooled: '{self.descriptions.get(k, k)[:70]}' requested by evaluators {sorted(set(js))}")
+        for j, hs in cands.items():
+            best = {}
+            for h in hs:
+                if h.feature not in best or (h.twin_effect or 0) > (best[h.feature].twin_effect or 0):
+                    best[h.feature] = h
+            cands[j] = list(best.values())
 
     def flip_fn(self, feature, description):
         def flip(app):
             has = code_llm(self.client, app.text, description)
             e = edit_llm(self.client, app.text, description, present=not has, min_similarity=self.min_similarity)
-            if not e.ok or code_llm(self.client, e.text, description) == has:
-                self.dropped_edits += 1
+            if not e.ok:
+                self._drop(e.reason)
+                return None
+            if e.text.strip() == app.text.strip():
+                self._drop("unchanged")
+                return None
+            if code_llm(self.client, e.text, description) == has:
+                self._drop("manipulation_check")
+                return None
+            if self.verify and not verify_edit_llm(self.client, app.text, e.text, description, present=not has):
+                self._drop("verifier")
                 return None
             return e.text, (-1 if has else 1)
         return flip

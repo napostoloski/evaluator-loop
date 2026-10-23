@@ -277,7 +277,11 @@ with no false confirmations. Recall was low for three reasons that the offline s
 cannot exhibit: hypotheses phrased differently by different evaluators were not pooled,
 so the battery budget went to singletons; the few-shot copy predicts from 10 pairs and is
 noisy; and many rewrites were incomplete (pronouns switched, name kept) yet passed the
-checks. `outputs/llm_sonnet/RUN_SUMMARY.md` gives the numbers and the fixes: a
-canonicalisation call that merges equivalent hypotheses, 30 pairs for the copy, and a
-manipulation check that verifies the markers named in the hypothesis. These are the
-pre-conditions for running the AI steps on real applications.
+checks. `outputs/llm_sonnet/RUN_SUMMARY.md` gives the numbers. The fixes are implemented: a
+canonicalisation call after screening that merges equivalent hypotheses and aligns their
+polarity before the batteries; 30 pairs for the copy, with a ridge-copy option that needs
+no model calls; offline sanity checks on every rewrite (sections, pronoun consistency,
+unchanged text, commentary) and a verifier call on battery edits. Replayed over the first
+run's rewrites, the checks raise the share of accepted edits that switch the intended
+feature from 71% to 84%, and to 100% for the gender cue. These are the pre-conditions for
+running the AI steps on real applications; a second real-model run has not yet been made.

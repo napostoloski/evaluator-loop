@@ -86,3 +86,56 @@ number only, which is handled by a tagged final line (`DEVIATION=+0.35`).
   same ($25 to $30) and takes three to four hours.
 - For Stage 2 the lesson is mainly about the edits: they need a verification step that
   checks the named markers, and a human audit, before any evaluator re-rates them.
+
+## Fixes made after the run (same day, tested without model calls)
+
+1. **Pooling.** `LLMBackend.canonicalize` runs once per round after screening: one model
+   call groups the passing hypotheses into distinct features with a canonical statement
+   and a polarity for each member. Equivalent statements share a feature key, so votes and
+   batteries pool; a member stated as the negation of the canonical statement has its
+   direction flipped; duplicates within one evaluator are collapsed. An offline fallback
+   groups by word overlap if the model's reply is unusable.
+2. **Screening.** Default 30 pairs per hypothesis (`--twin-pairs`). A pair is now the
+   original plus one rewrite in the opposite direction, decided by the coder, so one
+   rewrite per application instead of two, and a rewrite that comes back unchanged is
+   dropped. `--twin ridge` screens the model's rewrites with the offline ridge copy,
+   which needs no twin calls.
+3. **Edits.** `edit_sanity` rejects rewrites whose section headings differ from the
+   original, that introduce mixed pronouns, or that change pronouns without changing a
+   name; `_clean_rewrite` strips appended commentary before the checks. Battery edits
+   additionally go through the coder (as before) and a verifier call that compares
+   original and rewrite for minimality and contradictions (`--no-verify-edits` to skip).
+4. **Proposer.** The prompt now asks for one concrete, checkable property per
+   hypothesis, not lists of alternatives.
+
+Replay of the new edit checks over this run's 1,822 rewrites
+(`python -m evloop audit-edits --log outputs/llm_sonnet/llm_calls.jsonl`), restricted to
+rewrites where the hypothesis maps to a benchmark detector and a change was needed:
+
+| feature | needed | old checks accepted / switched detector | new checks accepted / switched detector |
+|---|---|---|---|
+| gender cue | 81 | 79 / 40 (51%) | 40 / 40 (100%) |
+| home-based | 70 | 70 / 70 (100%) | 70 / 70 (100%) |
+| family business | 123 | 123 / 103 (84%) | 120 / 103 (86%) |
+| foreign degree | 50 | 50 / 37 (74%) | 46 / 37 (80%) |
+| solo founder | 91 | 91 / 46 (51%) | 67 / 46 (69%) |
+| paying customers | 30 | 30 / 17 (57%) | 30 / 17 (57%) |
+| writing fluency | 20 | 20 / 18 (90%) | 20 / 18 (90%) |
+| all | 465 | 463 / 331 (71%) | 393 / 331 (84%) |
+
+The new checks rejected 72 rewrites: 50 that came back unchanged, 21 that switched
+pronouns but kept the name, 1 that contained only commentary. Every half-edit of the
+gender cue is now caught. The remaining misses for solo founder and paying customers are
+mostly rewrites faithful to a differently worded hypothesis (a survey count rather than
+paying customers; a grammar fix rather than a team change) that the benchmark's narrow
+detectors do not read, plus some genuinely weak edits that only the verifier call can
+catch.
+
+On the stub server, with the stub made to produce half-edits and appended commentary on
+purpose, the full demo now pools the gender feature across 16 evaluators, flips the
+polarity of the "man" statements, catches 61 half-edits, and confirms only planted
+preferences (5 of 5 with the stub's few-shot copy, 9 of the 10 reachable ones with the
+ridge copy, no false findings).
+
+A second real-model run with these fixes has not been made. Estimated cost: about $20 with
+`--twin ridge`, $50 to $60 with the few-shot copy at 30 pairs.

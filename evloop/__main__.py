@@ -83,7 +83,7 @@ def cmd_llm_demo(a):
                        temperature=None if a.temperature < 0 else a.temperature,
                        max_tokens_field=a.max_tokens_field, extra_headers=headers,
                        cache_dir=os.path.join(a.out, "llm_cache"), log_path=os.path.join(a.out, "llm_calls.jsonl"))
-    backend = LLMBackend(client, world)
+    backend = LLMBackend(client, world, n_twin_pairs=a.twin_pairs, twin=a.twin, verify=not a.no_verify_edits)
     k, budget = _design(a.battery_apps)
     cfg = LoopConfig(seed=a.seed, battery_apps=a.battery_apps, battery_features=k, budget=budget, max_rounds=a.rounds)
     results = run_panel(world, backend, cfg)
@@ -109,8 +109,95 @@ def cmd_llm_demo(a):
         rows.extend(trail_records(res))
     os.makedirs(a.out, exist_ok=True)
     pd.DataFrame(rows).to_csv(os.path.join(a.out, f"llm_demo_seed{a.seed}_audit_trail.csv"), index=False)
-    print(f"\nedits dropped by the similarity or manipulation check: {backend.dropped_edits}")
+    print(f"\nedits dropped: {backend.dropped_edits} {dict(sorted(backend.drop_reasons.items()))}")
     print(f"model calls: {client.n_calls}; replies cut off without an answer: {client.truncations}")
+    for rnd, groups in enumerate(backend.groups, 1):
+        pooled = {k: v for k, v in groups.items() if len(v) > 1}
+        print(f"round {rnd}: {len(groups)} distinct features after pooling, {len(pooled)} requested by more than one evaluator")
+    with open(os.path.join(a.out, f"llm_demo_seed{a.seed}_groups.json"), "w") as f:
+        json.dump([{backend.descriptions.get(k, k): v for k, v in g.items()} for g in backend.groups], f, indent=1)
+
+
+def cmd_audit_edits(a):
+    """Replay the rewrite checks over a logged run and report, per library feature, how many
+    rewrites the old and new checks accept and how often the accepted ones actually switch
+    the benchmark's detector. Needs no model calls."""
+    import re
+
+    from .llm import _clean_rewrite, edit_sanity, strip_think, word_similarity
+    from .testbed import detect
+
+    def lib(desc):
+        """Map a free-text hypothesis to a library detector only when it clearly states that
+        feature; returns (feature, inverted) or (None, False)."""
+        d = desc.lower()
+        if "woman" in d or "female" in d or "male name" in d or "male founder" in d:
+            return "gender_cue", ("male name" in d or "male founder" in d) and "female" not in d and "woman" not in d
+        if "founder's home" in d or "founder s home" in d or "from home" in d or "home-based" in d:
+            return "home_based", False
+        if "paying" in d and not re.search(r"figure|survey|interview|research|per unit|cost", d):
+            return "traction", "not mention" in d or "does not" in d
+        if ("sole founder" in d or "co-founder" in d) and not re.search(r"woman|female|male|man\b", d):
+            return "solo_founder", "co-founder" in d
+        if "lowercase" in d or "grammatical" in d:
+            return "fluency_high", True
+        if "united kingdom" in d or "uk university" in d or "uk master" in d:
+            return "foreign_degree", False
+        if "family business" in d:
+            return "family_business", False
+        return None, False
+
+    rows = {}
+    reasons = {}
+    for line in open(a.log):
+        c = json.loads(line)
+        if "request" not in c:
+            continue
+        u = c["request"]["messages"][0]["content"]
+        if not u.startswith("Rewrite the startup application"):
+            continue
+        m = re.search(r'becomes (TRUE|FALSE):\s*\n\s*"(.+?)"\s*\n', u, re.S)
+        if not m:
+            continue
+        truth, desc = m.group(1) == "TRUE", m.group(2)
+        text = u.split("APPLICATION\n", 1)[1]
+        feat, inverted = lib(desc)
+        if feat is None:
+            continue
+        want = int(truth) ^ int(inverted)
+        if detect(feat, text) == want:
+            continue                                  # no change was needed
+        raw = c["content"]
+        old_new = strip_think(raw).strip()
+        first = text.split(":", 1)[0] + ":"
+        pos = old_new.find(first)
+        if pos > 0:
+            old_new = old_new[pos:]
+        old_ok = word_similarity(text, old_new) >= 0.6
+        new_text = _clean_rewrite(raw, text)
+        ok, reason = edit_sanity(text, new_text)
+        if ok and new_text.strip() == text.strip():
+            ok, reason = False, "unchanged"
+        new_ok = ok and word_similarity(text, new_text) >= 0.6
+        if not new_ok:
+            reasons[reason or "similarity"] = reasons.get(reason or "similarity", 0) + 1
+        r = rows.setdefault(feat, dict(needed=0, old_ok=0, old_flip=0, new_ok=0, new_flip=0))
+        r["needed"] += 1
+        r["old_ok"] += old_ok
+        r["old_flip"] += old_ok and detect(feat, old_new) == want
+        r["new_ok"] += new_ok
+        r["new_flip"] += new_ok and detect(feat, new_text) == want
+    print(f"{'feature':16s} {'needed':>6s} | {'old accepted':>12s} {'of which flip':>13s} | {'new accepted':>12s} {'of which flip':>13s}")
+    tot = dict(needed=0, old_ok=0, old_flip=0, new_ok=0, new_flip=0)
+    for f, r in sorted(rows.items()):
+        for k in tot:
+            tot[k] += r[k]
+        print(f"{f:16s} {r['needed']:6d} | {r['old_ok']:12d} {r['old_flip']:6d} ({r['old_flip'] / max(r['old_ok'], 1):4.0%}) | "
+              f"{r['new_ok']:12d} {r['new_flip']:6d} ({r['new_flip'] / max(r['new_ok'], 1):4.0%})")
+    r = tot
+    print(f"{'all':16s} {r['needed']:6d} | {r['old_ok']:12d} {r['old_flip']:6d} ({r['old_flip'] / max(r['old_ok'], 1):4.0%}) | "
+          f"{r['new_ok']:12d} {r['new_flip']:6d} ({r['new_flip'] / max(r['new_ok'], 1):4.0%})")
+    print("rejections by the new checks:", dict(sorted(reasons.items())))
 
 
 def main():
@@ -138,9 +225,16 @@ def main():
     l.add_argument("--max-tokens-field", default="max_tokens", help="e.g. max_completion_tokens for reasoning APIs")
     l.add_argument("--rho", type=float, default=0.6)
     l.add_argument("--header", action="append", help='extra HTTP header, "Name: value" (repeatable)')
+    l.add_argument("--twin", choices=["llm", "ridge"], default="llm",
+                   help="screen with a few-shot LLM copy (default) or with the ridge text copy on the LLM's edits (no model calls)")
+    l.add_argument("--twin-pairs", type=int, default=30, help="edited pairs per hypothesis for the screen")
+    l.add_argument("--no-verify-edits", action="store_true", help="skip the verifier call on battery edits")
     l.add_argument("--extra-body", default=None,
                    help='JSON merged into every request, e.g. \'{"thinking": {"type": "between_tools"}}\' for Claude')
     l.add_argument("--out", default="outputs/llm"); l.set_defaults(f=cmd_llm_demo)
+    au = sub.add_parser("audit-edits", help="replay the rewrite checks over a logged LLM run (no model calls)")
+    au.add_argument("--log", required=True, help="llm_calls.jsonl from a run")
+    au.set_defaults(f=cmd_audit_edits)
     a = p.parse_args()
     a.f(a)
 
