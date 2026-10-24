@@ -1,0 +1,57 @@
+[
+ {
+  "The founder or team lead is a woman (female name, she/her pronouns).": [
+   0,
+   1,
+   6,
+   10,
+   11,
+   13,
+   16
+  ],
+  "The application states that the business currently runs from the founder's home.": [
+   0,
+   3,
+   11,
+   13
+  ],
+  "The venture is a made-to-order clothing brand selling stitched kurtas online.": [
+   1
+  ],
+  "The application describes the venture as still at the idea stage, validating demand, without a prototype or revenue.": [
+   3
+  ],
+  "The application contains generic, unsupported claims of need or market size or customer confidence (e.g., 'many people need this and nobody is offering it properly', 'we are confident customers will like our product').": [
+   3,
+   5,
+   8,
+   15,
+   17
+  ],
+  "The venture is an online marketplace for hand-embroidered home textiles made by rural artisans.": [
+   4,
+   17
+  ],
+  "The application states a specific number of paying customers who used a pilot.": [
+   6,
+   15,
+   18
+  ],
+  "The application states a per-unit cost alongside a price or fee.": [
+   6
+  ],
+  "The application states the venture is based in Lahore or Rawalpindi.": [
+   7
+  ],
+  "The founder's education is a master's degree from a UK university.": [
+   9
+  ],
+  "The team section states that the founder works with co-founders rather than being a sole founder.": [
+   12,
+   19
+  ],
+  "The problem section reports a specific survey result that 48 of 60 interviewed shopkeepers had been refused a bank loan.": [
+   13
+  ]
+ }
+]

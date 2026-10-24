@@ -201,3 +201,46 @@ features that only one evaluator requested when budget remains, and to run more 
 
 Precision, which is what a Stage 2 human round depends on, was 6 of 6 here and 1 of 1 in
 the first run.
+
+## Third run: revised proposer (v2), ridge screen (24 October 2026, night)
+
+```
+python -m evloop llm-demo --base-url https://api.anthropic.com/v1 --model claude-sonnet-5-5 \
+    --temperature -1 --seed 1 --extra-body '{"thinking": {"type": "between_tools"}}' \
+    --twin ridge --twin-pairs 20 --workers 4 --proposer-prompt v2 --hypotheses 6 --examples 20 \
+    --out outputs/llm_sonnet_v2
+```
+
+Same world, seed and budget. 5,300 live calls, $10.90 (the first-round proposals were reused
+from the proposer test). The run was interrupted once by HTTP 529 (provider overloaded),
+now retried by the client, and resumed from the cache.
+
+| | run 2 (v1 proposer) | run 3 (v2 proposer) |
+|---|---|---|
+| hypotheses proposed | 80 | 120 |
+| planted feature proposed for the right evaluator | 7/16 | 15/16 |
+| confirmed | 6 | 7 |
+| correct among confirmed | 6 | 7 |
+| null evaluators given a rule | 0/6 | 0/6 |
+
+New confirmation: Evaluator 1's gender cue (+0.59, q = 0.004). Across the three real-model
+runs, 14 of 14 confirmations are correct.
+
+Where the nine unconfirmed planted preferences were lost:
+- proposed, failed the ridge screen (5): sector for Evaluators 2 and 12, writing fluency for
+  4 and 14, paying customers for 5. The word-count copy underrates edits that change many
+  words a little (sector) or only punctuation and capitalisation (fluency).
+- tested, not significant (3): gender cue for Evaluator 6 (p = 0.05) and 10 (p = 0.09),
+  paying customers for 6 (p = 0.20); the power limit of 30 re-ratings per feature.
+- not proposed (1): paying customers for Evaluator 16.
+
+Battery allocation also lost capacity: the vague feature "generic, unsupported claims"
+won a battery on five requests (correctly rejected for all five), and the textile-
+marketplace battery found only 4 usable edits. Candidate fixes, not yet made: skip a
+battery that cannot reach a minimum size and give its slot to the next feature; rank
+features by summed predicted effect rather than vote count; a screen that is less biased
+against broad edits.
+
+With 150 re-ratings per evaluator the offline benchmark recovers about 64% of half-point
+preferences even with a proposer that never misses, so about 10 of 16 is the practical
+ceiling on this seed; the real-model path now reaches 7, with no false findings.

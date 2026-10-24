@@ -290,3 +290,13 @@ for three evaluators (two of them via pooled, polarity-flipped "male founder" st
 home-based for two, paying customers for one. The remaining misses were never proposed in
 a form that survived screening, so with five batteries per run recall is bounded by the
 language-model proposer. Precision across both runs is 7 of 7.
+
+A third run with a revised proposer prompt (20 contrasting applications per side, six
+distinct hypotheses, an explicit comparison of founder, venture, evidence and writing)
+proposed the planted feature for the right evaluator for 15 of 16 preferences, against 7
+with the original prompt, and confirmed 7 of 16, all correct ($10.90). A proposer-only test
+on three seeds gave 85% against 54%. With the proposer no longer the bottleneck, the
+remaining losses are the word-count screen's bias against broad edits (sector, writing
+style), the power of 30 re-ratings per feature, and battery allocation by vote count.
+Across the three real-model runs, 14 of 14 confirmations are correct and no evaluator
+without a planted preference was given a rule.

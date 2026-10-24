@@ -209,6 +209,16 @@ the simulated evaluators re-rated the edits as in the benchmark.
     the new checks accept 393 and 84% switch it (gender edits: 100%, up from 51%).
   - On the stub server, the full demo now pools the shared feature across evaluators and
     confirms only planted preferences (9 of the 10 it can reach, no false findings).
+- **Recommended configuration** (third run): revised proposer and ridge screen,
+  `--twin ridge --twin-pairs 20 --workers 4 --proposer-prompt v2 --hypotheses 6 --examples 20`.
+  The planted feature was proposed for the right evaluator for 15 of 16 preferences (the
+  current prompt: 7), and **7 were confirmed, all correct**, with no null evaluator given a
+  rule, for $10.90. Across three real-model runs, 14 of 14 confirmations are correct. The
+  remaining losses are downstream of the proposer: five true hypotheses failed the
+  word-count screen (sector and writing-style edits), three were tested but not significant
+  at 30 re-ratings, and two battery slots were spent on a vague feature and on a feature
+  with too few usable edits. See [`outputs/proposer_eval/`](outputs/proposer_eval/README.md)
+  for the proposer test.
 - **Second run, with the fixes** (`--twin ridge --twin-pairs 20 --workers 4`, same world,
   seed and budget): 80 hypotheses, 20 passed the screen and pooled into 10 features, 5
   batteries testing 13 evaluator-feature pairs, **6 confirmed, all 6 correct**, no null
