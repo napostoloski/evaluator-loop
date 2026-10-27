@@ -20,6 +20,8 @@
   --bad: #b23a2e;
   --bad-soft: #f7dcd8;
   --neutral-soft: #e6ebef;
+  --missed: #66727f;
+  --missed-soft: #e4e7eb;
   --display: "Source Serif 4", Georgia, "Times New Roman", serif;
   --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -28,13 +30,13 @@
   :root:not([data-theme="light"]) {
     --bg: #0e141a; --surface: #161f28; --sunk: #1d2833; --ink: #e2e9ef; --muted: #9aa9b7; --line: #2c3a47;
     --accent: #79b6e3; --accent-soft: #1d3446; --good: #6fcf9c; --good-soft: #173527; --warn: #e8b55a;
-    --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; color-scheme: dark;
+    --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; --missed: #a7b1bc; --missed-soft: #27303a; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e141a; --surface: #161f28; --sunk: #1d2833; --ink: #e2e9ef; --muted: #9aa9b7; --line: #2c3a47;
   --accent: #79b6e3; --accent-soft: #1d3446; --good: #6fcf9c; --good-soft: #173527; --warn: #e8b55a;
-  --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; color-scheme: dark;
+  --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; --missed: #a7b1bc; --missed-soft: #27303a; color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body);
@@ -87,13 +89,14 @@ main { display: grid; gap: 22px; min-width: 0; }
 .grid-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .grid-head h2, section h2 { font: 700 1.3rem/1.2 var(--display); margin: 0; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
-.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; background: var(--s); border: 2px solid var(--c); border-top-width: 4px; box-sizing: border-box; }
 .row-label { font-size: 0.8rem; color: var(--muted); margin: 6px 0 4px; }
 .evals { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
 @media (max-width: 700px) { .evals { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
-.ev { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 7px 6px 8px; text-align: left; cursor: pointer;
-  display: grid; gap: 3px; color: var(--ink); font: inherit; border-top: 4px solid var(--c); min-width: 0; }
-.ev[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ev { border: 1.5px solid var(--c); border-top-width: 6px; border-radius: 8px; background: var(--s); padding: 6px 6px 8px; text-align: left; cursor: pointer;
+  display: grid; gap: 3px; color: var(--ink); font: inherit; min-width: 0; align-content: start; }
+.ev[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+.ev .s { font: 600 0.74rem/1.2 var(--body); color: var(--c); }
 .ev .n { font: 500 0.78rem var(--mono); }
 .ev .r { font-size: 0.72rem; color: var(--muted); line-height: 1.25; overflow-wrap: break-word; }
 @media (max-width: 700px) { .ev { padding: 6px 4px 7px; } .ev .r { font-size: 0.64rem; } }
@@ -171,11 +174,11 @@ pre.cmd { background: var(--sunk); border-radius: 8px; padding: 10px 12px; margi
         <div class="grid-head">
           <h2>Evaluators</h2>
           <div class="legend">
-            <span style="--c: var(--good)">all planted found</span>
-            <span style="--c: var(--warn)">partly found</span>
-            <span style="--c: var(--muted)">missed</span>
-            <span style="--c: var(--accent)">none planted, none reported</span>
-            <span style="--c: var(--bad)">wrongly flagged</span>
+            <span style="--c: var(--good); --s: var(--good-soft)">found: all planted found</span>
+            <span style="--c: var(--warn); --s: var(--warn-soft)">partly: some found</span>
+            <span style="--c: var(--missed); --s: var(--missed-soft)">missed: none found</span>
+            <span style="--c: var(--accent); --s: var(--accent-soft)">clean: none planted, none reported</span>
+            <span style="--c: var(--bad); --s: var(--bad-soft)">flagged: none planted, something reported</span>
           </div>
         </div>
         <div class="row-label">Women evaluators</div>
@@ -269,10 +272,12 @@ function evStatus(e) {
   const nPlanted = e.planted.length;
   const found = e.planted.filter((p) => p.found).length;
   const extra = e.hypotheses.filter((h) => h.accepted && !h.planted).length;
-  if (!nPlanted) return extra ? { c: "var(--bad)", t: "wrongly flagged", extra } : { c: "var(--accent)", t: "none planted, none reported", extra };
-  if (found === nPlanted) return { c: "var(--good)", t: "all planted found", extra };
-  if (found > 0) return { c: "var(--warn)", t: "partly found", extra };
-  return { c: "var(--muted)", t: "missed", extra };
+  if (!nPlanted) return extra
+    ? { c: "var(--bad)", s: "var(--bad-soft)", w: "! flagged", t: "no planted preference, but a preference was reported", extra }
+    : { c: "var(--accent)", s: "var(--accent-soft)", w: "○ clean", t: "no planted preference, none reported", extra };
+  if (found === nPlanted) return { c: "var(--good)", s: "var(--good-soft)", w: "✓ found", t: "all planted preferences found", extra };
+  if (found > 0) return { c: "var(--warn)", s: "var(--warn-soft)", w: "◐ partly", t: "some planted preferences found", extra };
+  return { c: "var(--missed)", s: "var(--missed-soft)", w: "✗ missed", t: "planted preference missed", extra };
 }
 
 // small horizontal effect plot: dot at the estimate, whisker for the range, optional threshold
@@ -348,8 +353,8 @@ function render() {
   ["f", "m"].forEach((g) => {
     $(`evals-${g}`).innerHTML = run.evaluators.filter((e) => e.gender === g.toUpperCase()).map((e) => {
       const st = evStatus(e);
-      return `<button type="button" class="ev" id="ev-${e.id}" style="--c:${st.c}" aria-pressed="${e.id === state.evaluator}" title="${esc(st.t)}">
-        <span class="n">E${e.id}</span><span class="r">${esc(ROLE_SHORT[e.role] || e.role)}</span>
+      return `<button type="button" class="ev" id="ev-${e.id}" style="--c:${st.c}; --s:${st.s}" aria-pressed="${e.id === state.evaluator}" title="${esc(st.t)}" aria-label="Evaluator ${e.id}: ${esc(st.t)}">
+        <span class="n">E${e.id}</span><span class="s">${st.w}</span><span class="r">${esc(ROLE_SHORT[e.role] || e.role)}</span>
         ${st.extra ? `<span class="r" style="color: var(--bad)">+${st.extra} not planted</span>` : ""}</button>`;
     }).join("");
   });
