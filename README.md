@@ -126,11 +126,46 @@ Every table is in [`outputs/REPORT.md`](outputs/REPORT.md). The full specificati
 
 ```bash
 pip install -r requirements.txt
-python -m pytest                          # 15 tests, under a minute
+python -m pytest                          # 30 tests, about a minute
 python -m evloop demo --seed 1            # one synthetic world: per-evaluator results and the audit trail
 python -m evloop benchmark --seeds 12     # the full benchmark (about 30 minutes on 2 cores)
 python -m evloop report                   # rebuild tables and figures from outputs/benchmark_rows.csv
 ```
+
+## The app: settings, your own data, results per evaluator
+
+```bash
+pip install -e ".[app]"
+python -m evloop app                      # opens http://localhost:8501
+```
+
+**Simulated panel.** Choose the size of the planted preferences, how consistent re-ratings are,
+how many re-ratings each hypothesis gets and which simulated panel to draw; each setting is
+explained on the page, as are how the synthetic applications and evaluators are made. Run the
+prototype offline (about 20 seconds) or with an AI model, then see every evaluator's planted
+preferences next to the hypotheses the prototype considered: what the statistical copy
+predicted, what the re-ratings showed, and whether each confirmed preference was real.
+
+**Your own data.** Upload a panel where every evaluator rated the same applications:
+
+| file | columns |
+|---|---|
+| `applications.csv` | `application_id`, `text`, `founder_gender` (optional, F or M) |
+| `ratings.csv` | `evaluator_id`, `application_id`, `score` (one row per rating) |
+| `evaluators.csv` | `evaluator_id`, `gender` (optional); the whole file is optional |
+
+Real data has no re-ratings yet, so the prototype stops after screening. For each evaluator it
+returns the hypotheses an AI model proposed, whether the statistical copy supports them,
+example edits, and, for the most requested features, the edited applications a re-rating study
+would use (`hypotheses.csv`, `edits_to_rerate.csv`). Nothing is confirmed until evaluators
+re-rate. A quick look without any model shows the words most associated with each evaluator's
+departures from the panel. Applications are sent only to the AI provider chosen in the sidebar;
+check that the data permissions allow it. The app can write example files from a simulated
+panel to try the upload path first. The same path is available in code:
+`evloop.realdata.load_dataset` and `evloop.realdata.screen_dataset`.
+
+`scripts/precompute_runs.py` writes the offline runs behind the shareable web explorer (81
+runs over the settings grid, `outputs/interface/runs.json`).
 
 ## Running the loop with an LLM
 
@@ -255,6 +290,9 @@ evloop/testbed.py      applications, renderer, detectors, edit and redaction ope
 evloop/evaluators.py   evaluators with shared reactions and planted rules, outcomes, re-rating oracle
 evloop/loop.py         the loop (observe, propose, screen, confirm, update), offline backend, baselines
 evloop/llm.py          OpenAI-compatible client and the LLM backend
+evloop/realdata.py     uploaded applications and ratings: loading, checks, screening, exports
+evloop/present.py      plain-language summaries of runs for the app and the web explorer
+evloop/app.py          the local app (Streamlit)
 evloop/benchmark.py    replication grid and summary tables
 evloop/report.py       figures and outputs/REPORT.md
 docs/technical_note.md specification for the technical appendix

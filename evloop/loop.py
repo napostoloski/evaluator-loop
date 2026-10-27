@@ -37,7 +37,7 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import Lasso, Ridge, RidgeCV
 
-from .testbed import OPERATORS, OPS, detect, redact_gender
+from .testbed import OPERATORS, OPS, Application, detect, redact_gender
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
@@ -96,6 +96,8 @@ class Hypothesis:
     accepted: bool = False
     effect: float = float("nan")          # effect used when the rule is subtracted
     source: str = "proposed"              # "proposed", "nominated" (by the copy) or "panel" (tested without nomination)
+    examples: list = field(default_factory=list)   # a few (with feature, without feature) text pairs from screening
+    n_pairs: int = 0                      # usable edit pairs the screen was based on
 
     @property
     def key(self):
@@ -150,8 +152,13 @@ class TextSpace:
     """
 
     def __init__(self, apps, max_words: int = 600, n_topics: int = 20, seed: int = 0,
-                 coder_error: float = 0.05):
+                 coder_error: float = 0.05, library: bool | None = None):
         self.apps = apps
+        # the built-in edit library only applies to the synthetic applications; uploaded
+        # applications are edited by a language model instead
+        if library is None:
+            library = all(isinstance(a, Application) for a in apps)
+        self.library = library
         self.vec = TfidfVectorizer(ngram_range=(1, 2), min_df=3, max_features=max_words,
                                    lowercase=True, token_pattern=r"(?u)\b[\w'\-\[\]]+\b",
                                    sublinear_tf=True)
@@ -164,7 +171,9 @@ class TextSpace:
         self.X = (raw - self.mu) / self.sd
         self.vocab = np.array(list(self.vec.get_feature_names_out())
                               + [f"topic:{k}" for k in range(n_topics)] + STYLE_NAMES)
-        self.Xedit = {}
+        self.Xedit, self.signature, self.coded = {}, {}, {}
+        if not library:
+            return
         for op in OPERATORS:
             for v in (0, 1):
                 self.Xedit[(op.name, v)] = self.transform([op.set(a, v).text for a in apps])
@@ -725,5 +734,6 @@ def trail_records(res: EvaluatorResult):
         d["eid"] = res.eid
         d["twin_ci_lo"], d["twin_ci_hi"] = d.pop("twin_ci")
         d["top_terms"] = " | ".join(d["top_terms"])
+        d.pop("examples", None)
         rows.append(d)
     return rows

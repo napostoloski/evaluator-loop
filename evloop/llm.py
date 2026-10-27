@@ -645,6 +645,8 @@ class LLMBackend:
             else:
                 results = [self._edit_pair(i, h.description) for i in idx]
             pairs = [p for p in results if p]
+            h.n_pairs = len(pairs)
+            h.examples = pairs[:3]
             eff, ci = twin_effect(pairs)
             sign = 1.0 if h.target == 1 else -1.0
             h.twin_effect = sign * eff

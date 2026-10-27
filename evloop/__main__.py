@@ -4,6 +4,7 @@
     python -m evloop benchmark --seeds 12 --workers 2   # seeds 100-111
     python -m evloop report
     python -m evloop llm-demo --base-url http://localhost:8000/v1 --model Qwen/Qwen3.8-27B --no-thinking
+    python -m evloop app        # local app: simulated panel or your own data (needs pip install -e ".[app]")
 """
 from __future__ import annotations
 
@@ -203,6 +204,17 @@ def cmd_audit_edits(a):
     print("rejections by the new checks:", dict(sorted(reasons.items())))
 
 
+def cmd_app(a):
+    import subprocess
+    import sys
+    try:
+        import streamlit  # noqa: F401
+    except ImportError:
+        sys.exit('The app needs Streamlit: pip install -e ".[app]"')
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
+    sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", path, "--server.port", str(a.port)]))
+
+
 def main():
     p = argparse.ArgumentParser(prog="evloop")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -248,6 +260,8 @@ def main():
     au = sub.add_parser("audit-edits", help="replay the rewrite checks over a logged LLM run (no model calls)")
     au.add_argument("--log", required=True, help="llm_calls.jsonl from a run")
     au.set_defaults(f=cmd_audit_edits)
+    ap = sub.add_parser("app", help="local app: run the prototype on a simulated panel or on your own data")
+    ap.add_argument("--port", type=int, default=8501); ap.set_defaults(f=cmd_app)
     a = p.parse_args()
     a.f(a)
 
