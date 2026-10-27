@@ -1,0 +1,369 @@
+<title>Evaluator Loop Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a fixed settings column beside a results column; stacks on phones. Ink blue on cool paper. */
+:root {
+  --bg: #f3f6f9;
+  --surface: #ffffff;
+  --sunk: #e8eef3;
+  --ink: #15212c;
+  --muted: #586776;
+  --line: #d3dce4;
+  --accent: #1d5b86;
+  --accent-soft: #dbe9f4;
+  --good: #1f7a4d;
+  --good-soft: #dcf0e4;
+  --warn: #9a6200;
+  --warn-soft: #f8ebcf;
+  --bad: #b23a2e;
+  --bad-soft: #f7dcd8;
+  --neutral-soft: #e6ebef;
+  --display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141a; --surface: #161f28; --sunk: #1d2833; --ink: #e2e9ef; --muted: #9aa9b7; --line: #2c3a47;
+    --accent: #79b6e3; --accent-soft: #1d3446; --good: #6fcf9c; --good-soft: #173527; --warn: #e8b55a;
+    --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e141a; --surface: #161f28; --sunk: #1d2833; --ink: #e2e9ef; --muted: #9aa9b7; --line: #2c3a47;
+  --accent: #79b6e3; --accent-soft: #1d3446; --good: #6fcf9c; --good-soft: #173527; --warn: #e8b55a;
+  --warn-soft: #3a2c12; --bad: #f08a7e; --bad-soft: #3d1d19; --neutral-soft: #222d38; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px; }
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 28px; }
+header h1 { font: 700 2.1rem/1.15 var(--display); margin: 0 0 6px; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+.layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+aside { display: grid; gap: 18px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); }
+@media (max-width: 900px) { aside { position: static; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 16px; min-width: 0; }
+.label { font: 600 0.72rem/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#setting-list { display: grid; gap: 20px; }
+.setting { display: grid; gap: 7px; }
+.setting h3 { margin: 0; font: 600 0.95rem/1.3 var(--body); }
+.setting p { margin: 0; color: var(--muted); font-size: 0.84rem; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { flex: 1; padding: 7px 4px; font: 500 0.88rem var(--mono); background: var(--surface); color: var(--ink);
+  border: 0; border-right: 1px solid var(--line); cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.seg button:disabled { cursor: not-allowed; opacity: 0.45; }
+.seg button:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.engine { display: grid; gap: 8px; }
+.engine button { text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  color: var(--ink); cursor: pointer; font: 400 0.86rem/1.4 var(--body); }
+.engine button strong { display: block; font-weight: 600; font-size: 0.92rem; }
+.engine button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.note { font-size: 0.82rem; color: var(--muted); margin: 0; }
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+details + details { margin-top: -10px; }
+summary { cursor: pointer; padding: 13px 16px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+summary::after { content: "+"; color: var(--muted); font-family: var(--mono); }
+details[open] summary::after { content: "–"; }
+details .body { padding: 0 16px 16px; display: grid; gap: 10px; max-width: 78ch; }
+details .body p { margin: 0; }
+ol.steps { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; }
+pre.app { white-space: pre-wrap; font: 0.8rem/1.5 var(--mono); background: var(--sunk); border-radius: 8px; padding: 12px; margin: 0; max-height: 320px; overflow: auto; }
+main { display: grid; gap: 22px; min-width: 0; }
+.explain { display: grid; gap: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 4px; }
+.tile .v { font: 600 1.7rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 0.82rem; color: var(--muted); }
+.runline { font-size: 0.86rem; color: var(--muted); margin: 0; }
+.runline code { font-family: var(--mono); font-size: 0.82rem; }
+.grid-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.grid-head h2, section h2 { font: 700 1.3rem/1.2 var(--display); margin: 0; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.row-label { font-size: 0.8rem; color: var(--muted); margin: 6px 0 4px; }
+.evals { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 700px) { .evals { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.ev { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 7px 6px 8px; text-align: left; cursor: pointer;
+  display: grid; gap: 3px; color: var(--ink); font: inherit; border-top: 4px solid var(--c); min-width: 0; }
+.ev[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ev .n { font: 500 0.78rem var(--mono); }
+.ev .r { font-size: 0.72rem; color: var(--muted); line-height: 1.25; overflow-wrap: break-word; }
+@media (max-width: 700px) { .ev { padding: 6px 4px 7px; } .ev .r { font-size: 0.64rem; } }
+.detail { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.detail h3 { margin: 0; font: 700 1.15rem/1.25 var(--display); }
+.planted { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 500; background: var(--neutral-soft); color: var(--ink); white-space: nowrap; }
+.pill.good { background: var(--good-soft); color: var(--good); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.info { background: var(--accent-soft); color: var(--accent); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.86rem; }
+th { text-align: left; font: 600 0.72rem/1.2 var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: bottom; }
+td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.num { font-family: var(--mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.hyp { min-width: 180px; }
+td .pill { white-space: normal; border-radius: 8px; }
+td, th { padding-left: 6px; padding-right: 6px; }
+.fxcell { display: flex; align-items: center; gap: 8px; white-space: nowrap; font: 0.8rem var(--mono); font-variant-numeric: tabular-nums; }
+svg.fx { display: block; }
+svg.fx .track { stroke: var(--line); }
+svg.fx .zero { stroke: var(--muted); }
+svg.fx .thr { stroke: var(--warn); stroke-dasharray: 2 2; }
+.caption { font-size: 0.8rem; color: var(--muted); margin: 0; max-width: 90ch; }
+section.own { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 12px; }
+section.own p { margin: 0; max-width: 78ch; }
+.fmt { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 0.86rem; }
+.fmt code, pre.cmd { font-family: var(--mono); font-size: 0.82rem; }
+pre.cmd { background: var(--sunk); border-radius: 8px; padding: 10px 12px; margin: 0; overflow-x: auto; }
+.err { color: var(--bad); }
+@media (prefers-reduced-motion: no-preference) { .ev, .seg button, .engine button { transition: background-color .15s, border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Evaluator Loop Explorer</h1>
+    <p>The prototype proposes explanations of each evaluator's ratings, builds one-detail edits of applications to test them, and confirms only what the evaluator's re-ratings support. Here it runs on simulated panels whose true preferences are known, so you can see what it finds and what it misses.</p>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="panel" id="settings">
+        <div class="label">Settings</div>
+        <div class="engine" id="engine">
+          <button type="button" id="eng-offline" aria-pressed="true"><strong>Offline prototype</strong>A lasso proposes candidates and a fixed library of edits builds the tests. Every combination of settings.</button>
+          <button type="button" id="eng-ai" aria-pressed="false"><strong>Real AI model</strong>Claude Sonnet 5.5 proposed the hypotheses and wrote and checked the edits. One run, at the default settings.</button>
+        </div>
+        <div id="setting-list"></div>
+        <p class="note" id="ai-note" hidden>The real-AI run was done once, at these settings, so the other options are locked.</p>
+      </div>
+    </aside>
+
+    <main>
+      <div class="explain">
+        <details>
+          <summary>How the synthetic applications are created</summary>
+          <div class="body"><p id="how-apps"></p><div class="label">An example application</div><pre class="app" id="example-app"></pre></div>
+        </details>
+        <details>
+          <summary>How the simulated evaluators work</summary>
+          <div class="body"><p id="how-evals"></p></div>
+        </details>
+        <details>
+          <summary>What the prototype does</summary>
+          <div class="body"><ol class="steps" id="how-proto"></ol></div>
+        </details>
+      </div>
+
+      <div id="status" class="note">Loading the runs…</div>
+      <div class="tiles" id="tiles"></div>
+      <p class="runline" id="runline"></p>
+
+      <div>
+        <div class="grid-head">
+          <h2>Evaluators</h2>
+          <div class="legend">
+            <span style="--c: var(--good)">all planted found</span>
+            <span style="--c: var(--warn)">partly found</span>
+            <span style="--c: var(--muted)">missed</span>
+            <span style="--c: var(--accent)">none planted, none reported</span>
+            <span style="--c: var(--bad)">wrongly flagged</span>
+          </div>
+        </div>
+        <div class="row-label">Women evaluators</div>
+        <div class="evals" id="evals-f"></div>
+        <div class="row-label">Men evaluators</div>
+        <div class="evals" id="evals-m"></div>
+      </div>
+
+      <div class="detail" id="detail"></div>
+
+      <section class="own">
+        <h2>Your own data</h2>
+        <p>The prototype also runs on a real panel, where every evaluator rated the same applications. Real data has no re-ratings yet, so it stops after screening. For each evaluator you get the hypotheses an AI model proposed, whether the statistical copy of that evaluator supports them, example edits, and the edited applications a re-rating study would use. Nothing is confirmed until evaluators re-rate.</p>
+        <p>This runs in the local app, on your own computer, so your applications go only to the AI provider you choose. Check that your data permissions allow that before running it.</p>
+        <div class="fmt" id="fmt"></div>
+        <pre class="cmd">pip install -e ".[app]"
+python -m evloop app</pre>
+        <p class="note">The app opens in your browser. Choose "Your own data", upload the files, set up the AI model in the sidebar, and run. It can also make example files from a simulated panel to try first.</p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const TEXT = {
+  apps: "Each simulated panel has 156 applications. Every application is generated from a set of founder and venture attributes and written out as a short text with sections on the team, the venture and the evidence, modelled on the XSEED application form. The attributes are the founder's gender (40% women), shown through the name and pronouns; the city (60% in a large metropolitan city); the sector (consumer and lifestyle, or technology); whether the business runs from home; how fluent the English is (low fluency produces small writing slips); whether the founder has a foreign degree or grew up in a family business; team size (35% apply alone); years of experience; and a hidden quality score that drives the venture's stage and whether it reports paying pilot customers. Several attributes travel together on purpose. Women founders more often run consumer ventures (65% against 30%) and home-based businesses, and founders in large cities more often write fluent English and hold foreign degrees. These correlations are what make the true cause of a judgment hard to find.",
+  evals: "Each panel has 20 evaluators, 10 women and 10 men, and every evaluator scores every application on five criteria from 1 to 5. An evaluator's score combines their leniency, how well they read the hidden quality, their own noisy reading of each venture, reactions the whole panel shares (paying customers +0.30, fluent English +0.15, experience +0.15, applying alone −0.15, each varying slightly from evaluator to evaluator), and any planted preferences. Among the 10 evaluators of each gender, two have a same-gender premium triggered by the founder's name and pronouns, one prefers a sector that is more common among founders of their own gender, one reacts to home-based businesses (women evaluators favour them, men penalise them), one prefers fluent English, one prefers paying customers, one has both the same-gender premium and the preference for paying customers, and three have no planted preference. That makes 16 planted preferences across 14 evaluators. The prototype is never told any of this.",
+  steps: [
+    ["Spot the disagreements", "For each evaluator, measure how far their score for each application departs from what the rest of the panel gave it."],
+    ["Propose explanations", "Find features of the text that could explain the departures. Offline this is a lasso over the text; with an AI model, the model reads the most over- and under-rated applications and states features in plain words."],
+    ["Build the tests", "Rewrite applications so that only that one feature changes. Offline the rewrites come from a fixed library of edits; with an AI model, the model writes them and automatic checks discard edits that change anything else."],
+    ["Screen cheaply", "A statistical copy of the evaluator, trained on their past scores, predicts whether the edits would move them. Only ideas the copy supports go forward."],
+    ["Confirm with re-ratings", "The evaluator re-rates edited applications. An idea counts only if this evaluator reacts more than the rest of the panel, after correcting for the number of tests. Here the re-ratings come from the simulated evaluators."],
+    ["Repeat", "Confirmed preferences are removed and the search runs again on what is left."]
+  ],
+  fmt: [["applications.csv", "application_id, text, founder_gender (optional: F or M)"],
+        ["ratings.csv", "evaluator_id, application_id, score (one row per rating)"],
+        ["evaluators.csv", "evaluator_id, gender (optional: F or M); the whole file is optional"]]
+};
+const SETTINGS = [
+  { key: "delta", label: "Size of the planted preferences", options: [0.25, 0.5, 0.75], def: 0.5,
+    help: "How much a planted preference moves an evaluator's score, in points on the 1–5 scale. 0.25 is subtle, 0.5 moderate, 0.75 strong." },
+  { key: "rho", label: "Consistency of re-ratings", options: [0.3, 0.6, 0.9], def: 0.6,
+    help: "How similarly an evaluator reads the same venture the second time. At 0.9 the second reading is almost the same as the first; at 0.3 much of it is new, so re-ratings are noisier." },
+  { key: "battery", label: "Re-ratings per hypothesis", options: [15, 30, 50], def: 30,
+    help: "Edited applications each evaluator re-rates to test one hypothesis, half with the feature added and half removed. Up to 150 re-ratings per evaluator in total: 15 per test uses 75, 30 uses 150, and 50 allows only three tests." },
+  { key: "seed", label: "Simulated panel", options: [1, 2, 3], def: 1,
+    help: "Which random panel to draw. Each has the same structure with newly drawn applications and evaluators, so comparing panels shows how much results vary by chance." }
+];
+const ROLE_SHORT = { cue: "Gender cue", proxy: "Sector", proxy_home: "Home-based", fluency: "Fluent English",
+  ability: "Customers", multi: "Gender cue + customers", null: "None planted" };
+const VERDICT = { "confirmed": "good", "tested, not confirmed": "warn", "passed screening, not tested": "info", "dropped at screening": "" };
+const VERDICT_ORDER = ["confirmed", "tested, not confirmed", "passed screening, not tested", "dropped at screening"];
+
+const state = { delta: 0.5, rho: 0.6, battery: 30, seed: 1, engine: "offline", evaluator: 0 };
+let DATA = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (x, d = 2) => (x === null || x === undefined) ? "–" : (x > 0 ? "+" : "") + Number(x).toFixed(d);
+
+function buildStatic() {
+  $("how-apps").textContent = TEXT.apps;
+  $("how-evals").textContent = TEXT.evals;
+  $("how-proto").innerHTML = TEXT.steps.map(([t, d]) => `<li><strong>${esc(t)}.</strong> ${esc(d)}</li>`).join("");
+  $("fmt").innerHTML = TEXT.fmt.map(([f, c]) => `<code>${esc(f)}</code><span>${esc(c)}</span>`).join("");
+  $("setting-list").innerHTML = SETTINGS.map((s) => `
+    <div class="setting">
+      <h3 id="lab-${s.key}">${esc(s.label)}</h3>
+      <div class="seg" role="group" aria-labelledby="lab-${s.key}">
+        ${s.options.map((o) => `<button type="button" id="opt-${s.key}-${String(o).replace(".", "_")}" data-key="${s.key}" data-val="${o}">${o}</button>`).join("")}
+      </div>
+      <p>${esc(s.help)}</p>
+    </div>`).join("");
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    state[b.dataset.key] = Number(b.dataset.val); render();
+  }));
+  $("eng-offline").addEventListener("click", () => { state.engine = "offline"; render(); });
+  $("eng-ai").addEventListener("click", () => {
+    state.engine = "ai"; Object.assign(state, { delta: 0.5, rho: 0.6, battery: 30, seed: 1 }); render();
+  });
+}
+
+function currentRun() {
+  if (!DATA) return null;
+  if (state.engine === "ai") return DATA.ai;
+  return DATA.grid[`${state.delta}|${state.rho}|${state.battery}|${state.seed}`] || null;
+}
+
+function evStatus(e) {
+  const nPlanted = e.planted.length;
+  const found = e.planted.filter((p) => p.found).length;
+  const extra = e.hypotheses.filter((h) => h.accepted && !h.planted).length;
+  if (!nPlanted) return extra ? { c: "var(--bad)", t: "wrongly flagged", extra } : { c: "var(--accent)", t: "none planted, none reported", extra };
+  if (found === nPlanted) return { c: "var(--good)", t: "all planted found", extra };
+  if (found > 0) return { c: "var(--warn)", t: "partly found", extra };
+  return { c: "var(--muted)", t: "missed", extra };
+}
+
+// small horizontal effect plot: dot at the estimate, whisker for the range, optional threshold
+function fxPlot(est, lo, hi, opts) {
+  if (est === null || est === undefined) return "–";
+  const W = 92, H = 18, [a, b] = opts.domain;
+  const x = (v) => Math.max(2, Math.min(W - 2, ((v - a) / (b - a)) * W));
+  const col = opts.color;
+  let s = `<svg class="fx" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.aria)}">`;
+  s += `<line class="track" x1="0" x2="${W}" y1="9" y2="9" stroke-width="1"/>`;
+  s += `<line class="zero" x1="${x(0)}" x2="${x(0)}" y1="3" y2="15" stroke-width="1"/>`;
+  if (opts.thr !== undefined) s += `<line class="thr" x1="${x(opts.thr)}" x2="${x(opts.thr)}" y1="2" y2="16" stroke-width="1"/>`;
+  if (lo !== null && hi !== null && lo !== undefined && hi !== undefined)
+    s += `<line x1="${x(lo)}" x2="${x(hi)}" y1="9" y2="9" stroke="${col}" stroke-width="2.5" stroke-linecap="round"/>`;
+  s += `<circle cx="${x(est)}" cy="9" r="3.6" fill="${col}"/></svg>`;
+  return s;
+}
+
+function renderDetail(run) {
+  const e = run.evaluators[state.evaluator];
+  const st = evStatus(e);
+  const planted = e.planted.length
+    ? e.planted.map((p) => `<span class="pill ${p.found ? "good" : "warn"}">${esc(p.text)} · ${p.found ? "found" : "missed"}</span>`).join("")
+    : `<span class="pill">No planted preference</span>`;
+  const hyps = [...e.hypotheses].sort((a, b) => (a.round - b.round) || (VERDICT_ORDER.indexOf(a.verdict) - VERDICT_ORDER.indexOf(b.verdict)));
+  const rows = hyps.map((h) => {
+    const sc = h.screen_pass ? "var(--accent)" : "var(--muted)";
+    const re = h.accepted ? "var(--good)" : "var(--warn)";
+    const ci = (h.effect !== null && h.se !== null) ? [h.effect - 1.96 * h.se, h.effect + 1.96 * h.se] : [null, null];
+    const realTag = h.accepted ? (h.planted ? `<span class="pill good">planted</span>` : `<span class="pill bad">not planted</span>`) : (h.planted ? `<span class="pill">planted</span>` : "");
+    return `<tr>
+      <td class="hyp">${esc(h.text)}${run.mode === "ai" ? `<div class="note">${esc(h.direction)}</div>` : ""}</td>
+      <td class="num">${h.round}</td>
+      <td><div class="fxcell">${fxPlot(h.screen_effect, h.screen_low, h.screen_high, { domain: [-0.4, 0.8], color: sc, thr: 0.05, aria: `copy predicts ${fmt(h.screen_effect)}` })}<span>${fmt(h.screen_effect)}</span></div></td>
+      <td>${h.tested ? `<div class="fxcell">${fxPlot(h.effect, ci[0], ci[1], { domain: [-0.6, 1.2], color: re, thr: 0.1, aria: `re-rating effect ${fmt(h.effect)}` })}<span>${fmt(h.effect)}</span></div>` : "–"}</td>
+      <td class="num">${h.tested && h.q !== null ? Number(h.q).toPrecision(2) : "–"}</td>
+      <td><span class="pill ${VERDICT[h.verdict] || ""}">${esc(h.verdict)}</span></td>
+      <td>${realTag}</td></tr>`;
+  }).join("");
+  $("detail").innerHTML = `
+    <div class="grid-head"><h3>Evaluator ${e.id} (${e.gender === "F" ? "woman" : "man"}): ${esc(e.role_text)}</h3>
+      <span class="pill" style="background: var(--neutral-soft)">${e.rerated} re-ratings</span></div>
+    <div><div class="label" style="margin-bottom:6px">Planted, the truth the prototype never sees</div><div class="planted">${planted}</div></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Hypothesis</th><th>Round</th><th>Copy's predicted effect</th><th>Re-rating effect vs panel</th><th>q</th><th>Outcome</th><th>Real?</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7">No hypotheses were proposed for this evaluator.</td></tr>`}</tbody>
+    </table></div>
+    <p class="caption">Copy's predicted effect: how much the statistical copy of this evaluator expects the edit to move their score, in points, with the range across 50 refits; the dashed line marks the 0.05 a hypothesis needs to pass. Re-rating effect: how much more this evaluator reacted to the edit than the rest of the panel, with a 95% interval; a preference is confirmed when q, the p-value corrected for the number of tests, is below 0.05 and the effect is at least 0.10 (dashed line).</p>`;
+}
+
+function render() {
+  document.querySelectorAll(".seg button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(state[b.dataset.key] === Number(b.dataset.val)));
+    b.disabled = state.engine === "ai";
+  });
+  $("eng-offline").setAttribute("aria-pressed", String(state.engine === "offline"));
+  $("eng-ai").setAttribute("aria-pressed", String(state.engine === "ai"));
+  $("ai-note").hidden = state.engine !== "ai";
+  const run = currentRun();
+  if (!run) { $("status").textContent = DATA ? "No run for these settings." : "Loading the runs…"; return; }
+  $("status").hidden = true;
+  const s = run.summary;
+  const rr = Math.max(...run.evaluators.map((e) => e.rerated));
+  $("tiles").innerHTML = [
+    [`${s.found} of ${s.planted}`, "planted preferences found"],
+    [s.real_share === null ? "–" : `${Math.round(100 * s.real_share)}%`, `of reported preferences were real (${s.real} of ${s.reported})`],
+    [`${s.null_flagged} of ${s.null_evaluators}`, "evaluators without a preference wrongly flagged"],
+    [`${rr}`, "re-ratings per evaluator"]
+  ].map(([v, k]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
+  $("runline").innerHTML = state.engine === "ai"
+    ? "Real AI model: Claude Sonnet 5.5, simulated panel 1, half-point preferences, 30 re-ratings per hypothesis, one round."
+    : `Offline prototype on simulated panel ${state.seed}: preferences of ${state.delta} points, re-rating consistency ${state.rho}, ${state.battery} re-ratings per hypothesis.`;
+  ["f", "m"].forEach((g) => {
+    $(`evals-${g}`).innerHTML = run.evaluators.filter((e) => e.gender === g.toUpperCase()).map((e) => {
+      const st = evStatus(e);
+      return `<button type="button" class="ev" id="ev-${e.id}" style="--c:${st.c}" aria-pressed="${e.id === state.evaluator}" title="${esc(st.t)}">
+        <span class="n">E${e.id}</span><span class="r">${esc(ROLE_SHORT[e.role] || e.role)}</span>
+        ${st.extra ? `<span class="r" style="color: var(--bad)">+${st.extra} not planted</span>` : ""}</button>`;
+    }).join("");
+  });
+  document.querySelectorAll(".ev").forEach((b) => b.addEventListener("click", () => {
+    state.evaluator = Number(b.id.slice(3)); render();
+  }));
+  renderDetail(run);
+}
+
+buildStatic();
+render();
+fetch("runs.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((d) => {
+  DATA = d;
+  $("example-app").textContent = d.example_application || "";
+  render();
+}).catch(() => { $("status").innerHTML = '<span class="err">The run data could not be loaded. Reload the page to try again.</span>'; });
+</script>

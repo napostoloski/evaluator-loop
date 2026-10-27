@@ -127,7 +127,7 @@ def show_upload(summary, H, B):
     st.info("These are hypotheses that passed a cheap screen, not findings. Each would need re-ratings by the "
             "evaluator to be confirmed.")
     if summary["shared_features"]:
-        st.markdown("**Hypotheses that passed screening for more than one evaluator**")
+        st.markdown("**Hypotheses that passed screening, and for which evaluators**")
         st.dataframe(pd.DataFrame([dict(Hypothesis=f["text"], Evaluators=", ".join(f["evaluators"]))
                                    for f in summary["shared_features"]]), hide_index=True)
     ids = [e["id"] for e in summary["evaluators"]]

@@ -2,7 +2,8 @@
 
     python scripts/precompute_runs.py --out outputs/interface --workers 2
 
-Writes one JSON summary per run and a combined runs.json. Each run takes about 20 seconds.
+Writes one JSON summary per run (outputs/interface/runs/). Each run takes about 20 seconds.
+Then: python scripts/build_explorer_data.py outputs/interface explorer/runs.json
 """
 import argparse
 import itertools
@@ -42,13 +43,7 @@ def main():
     with ProcessPoolExecutor(a.workers) as ex:
         for i, p in enumerate(ex.map(one, [(d, r, b, s, a.out) for d, r, b, s in grid]), 1):
             print(f"{i}/{len(grid)} {os.path.basename(p)}", flush=True)
-    runs = {}
-    for d, r, b, s in grid:
-        with open(os.path.join(a.out, "runs", f"d{d}_r{r}_b{b}_s{s}.json")) as f:
-            runs[f"{d}|{r}|{b}|{s}"] = json.load(f)
-    with open(os.path.join(a.out, "runs.json"), "w") as f:
-        json.dump(runs, f, separators=(",", ":"))
-    print("wrote", os.path.join(a.out, "runs.json"))
+    print("done; build the explorer data with scripts/build_explorer_data.py")
 
 
 if __name__ == "__main__":

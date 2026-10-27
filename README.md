@@ -164,8 +164,12 @@ check that the data permissions allow it. The app can write example files from a
 panel to try the upload path first. The same path is available in code:
 `evloop.realdata.load_dataset` and `evloop.realdata.screen_dataset`.
 
-`scripts/precompute_runs.py` writes the offline runs behind the shareable web explorer (81
-runs over the settings grid, `outputs/interface/runs.json`).
+**Web explorer.** `explorer/index.html` is a page that shows pre-computed offline runs for
+every combination of the settings above (3 preference sizes x 3 re-rating consistencies x 3
+battery sizes x 3 panels = 81 runs) and the real-AI run, with each evaluator's hypotheses
+against the planted truth. Serve the folder (`python -m http.server -d explorer`) and open it.
+To rebuild its data: `python scripts/precompute_runs.py` (about 30 minutes on 2 cores), then
+`python scripts/build_explorer_data.py outputs/interface explorer/runs.json`.
 
 ## Running the loop with an LLM
 
@@ -293,6 +297,8 @@ evloop/llm.py          OpenAI-compatible client and the LLM backend
 evloop/realdata.py     uploaded applications and ratings: loading, checks, screening, exports
 evloop/present.py      plain-language summaries of runs for the app and the web explorer
 evloop/app.py          the local app (Streamlit)
+explorer/              the shareable web explorer and its pre-computed runs
+scripts/               pre-computing the explorer's runs and building its data file
 evloop/benchmark.py    replication grid and summary tables
 evloop/report.py       figures and outputs/REPORT.md
 docs/technical_note.md specification for the technical appendix
