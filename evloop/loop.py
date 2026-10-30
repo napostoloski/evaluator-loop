@@ -1,4 +1,4 @@
-"""Route B: a hypothesis loop that locates what in an application drives an evaluator.
+"""The evaluator loop: a hypothesis loop that locates what in an application drives an evaluator.
 
 The loop runs over the whole panel in rounds. In each round:
 

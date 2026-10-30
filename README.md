@@ -1,18 +1,80 @@
 # evaluator-loop
 
-**An AI-enabled loop for locating the roots of evaluator bias: prototype and planted-rule benchmark.**
+**The evaluator loop: an AI model proposes what drives each evaluator's judgments and writes
+one-detail edits of real applications; re-ratings confirm what holds.**
 
-Research artifact for the Organization Science special issue proposal *Opening the Evaluator's
-Black Box*. The study behind it has 156 startup applications to an incubation program in
-Pakistan, each scored by 20 expert evaluators and by five LLMs under seven conditions, with
-preregistered outcomes.
+Research artifact for the Organization Science special issue proposal *From Prediction to
+Explanation: Using AI to Design Counterfactual Experiments of Human Judgment*. The method is
+built for panels in which every evaluator scores the same applications, such as the 156
+startup applications to an accelerator program in Pakistan that 20 evaluators scored in early
+2026.
 
-This repository implements the part of the proposal that asks **which feature of an
-application drives a particular evaluator's judgment, beyond what the whole panel reacts
-to**. It tests the method on synthetic evaluators whose rules we planted, so the right answer
-is known.
+The repository asks **which feature of an application drives a particular evaluator's
+judgment, beyond what the whole panel reacts to**. It contains the prototype, the benchmark
+behind Table 1 of the proposal, in which the evaluators' preferences are planted so the right
+answer is known, the three runs with a commercial language model, a local app (including a
+path for researchers' own data) and a web explorer.
 
 No real application, rating or outcome is included. Everything here is synthetic.
+
+## For reviewers
+
+- **Interactive explorer** (no installation): [the evaluator loop explorer](https://claude.ai/artifact/5PC1tA5siacgEBm1G27Mhn).
+  Choose the settings, then click any of the 20 simulated evaluators to see the hypotheses the
+  prototype tested and whether each finding was real. The same page is in `explorer/`.
+- **Specification:** [`docs/technical_note.md`](docs/technical_note.md), the basis of the
+  technical appendix.
+- **Every benchmark table:** [`outputs/REPORT.md`](outputs/REPORT.md).
+- **Runs with a language model:** [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md),
+  with each run's audit trail and every saved model call in `outputs/llm_sonnet*/`.
+
+**Terms.** The proposal says *preference* where the code and report say *rule*, and
+*statistical copy* where they say *twin*.
+
+### Where each number in the proposal comes from
+
+Benchmark numbers are means over 12 simulated panels (seeds 100 to 111) with half-point
+preferences, 30 re-ratings per hypothesis, up to 150 per evaluator, and re-rating consistency
+ρ = 0.6. In `outputs/summary_recovery.csv` these are the rows with `delta` 0.5, `budget` 150,
+`battery_apps` 30 and `rho` 0.6.
+
+| Proposal | Value | Source |
+|---|---|---|
+| Table 1, prototype | 10.2 of 16 found (64%), 90% real, 7% wrongly flagged | method `loop`: recall 0.635, precision 0.904, null rate 0.069 |
+| Table 1, LASSO candidates, untested | 12.3 (77%), 51%, 39% | method `screen`: 0.771, 0.505, 0.389 |
+| Table 1, LASSO candidates with the statistical copy, no re-ratings | 14.3 (89%), 39%, 67% | method `twin`: 0.891, 0.387, 0.667. It finds more than `screen` because it accepts on the copy's estimate rather than the LASSO's and runs a second round |
+| Table 1, regression on all ten candidate features | 7.2 (45%), 80%, 13% | method `library`: 0.448, 0.804, 0.125 |
+| Introduction, 90% against 51% real | | Table 1, first two rows |
+| Re-ratings spread evenly over all ten features | 5% found | method `edit_all`: recall 0.052 |
+| Same-gender premium: 85 of 240 evaluators; source identified in 82% | against 62% for the statistical copy alone, 61% and 53% for the regressions | `outputs/summary_root_attribution.csv`, `delta` 0.5, column `names_the_right_feature` (methods `loop`, `twin`, `coded`, `library`) |
+| Smaller preferences | 8% found at a quarter point, 86% at three quarters | method `loop`, `delta` 0.25 and 0.75 |
+| Runs with Claude Sonnet 5.5 | 1, then 6 and 7 of 16 found, all real, none for the six evaluators without a preference; runs 2 and 3 about an hour and $8.49 and $10.90 | [`outputs/llm_sonnet/RUN_SUMMARY.md`](outputs/llm_sonnet/RUN_SUMMARY.md) |
+
+### Reproducing the results
+
+```bash
+pip install -r requirements.txt
+python -m pytest                          # the tests, about a minute
+python -m evloop benchmark --seeds 12     # the full benchmark behind Table 1 (about 30 minutes on 2 cores)
+python -m evloop report                   # rebuilds outputs/REPORT.md and the summary files
+```
+
+The third run with a language model replays exactly from its saved calls, with no API key and
+no model calls:
+
+```bash
+mkdir -p replay && tar -xzf outputs/llm_sonnet_v2/llm_cache.tar.gz -C replay
+python -m evloop llm-demo --base-url https://api.anthropic.com/v1 --model claude-sonnet-5-5 \
+    --temperature -1 --seed 1 --extra-body '{"thinking": {"type": "between_tools"}}' \
+    --twin ridge --twin-pairs 20 --workers 4 --proposer-prompt v2 --hypotheses 6 --examples 20 \
+    --out replay
+```
+
+It takes about a minute, ends with "model calls: 0" and writes the same audit trail as
+`outputs/llm_sonnet_v2/llm_demo_seed1_audit_trail.csv` (the current code adds one column,
+`n_pairs`): every hypothesis, screen and test is identical, including the seven confirmed
+preferences and their estimates. The first two runs used earlier versions of the code, so their saved
+calls are an audit record rather than an exact replay.
 
 ## The idea
 
@@ -73,7 +135,7 @@ With planted rules of 0.5 points on the 1-5 scale and 150 re-ratings per evaluat
 | Edit everything: same 150 re-ratings over all ten features, no screen | 0.91 | 0.05 | 0% |
 | Twin only (no re-ratings) | 0.39 | 0.89 | 67% |
 | Text screen only | 0.51 | 0.77 | 39% |
-| Regression on all ten coded features (no re-ratings) | 0.80 | 0.45 | 12% |
+| Regression on all ten coded features (no re-ratings) | 0.80 | 0.45 | 13% |
 | Regression on the usual structured covariates | 0.74 | 0.33 | 11% |
 
 ![Recovery by effect size](outputs/fig_recovery_by_effect_size.png)
@@ -94,8 +156,10 @@ What the benchmark shows:
 - **It locates the source of an apparent same-gender premium.** Among evaluators with a
   significant same-gender premium, the loop classifies it correctly as the name-and-pronoun
   cue or as gender-correlated content (sector or home-based) in 82% of cases, and names the
-  right feature in those cases. Regressions without edits manage 53% to 61%. A redaction
-  battery with the same budget separates cue from content in 66%.
+  right feature in those cases. Regressions without edits name the right feature in 53% to
+  61%. The twin alone classifies cue against content correctly in 86% but names the right
+  feature in only 62%. A redaction battery with the same budget separates cue from content
+  in 66%.
 
 Where it is weak:
 
@@ -186,14 +250,16 @@ It talks to any OpenAI-compatible server using only the standard library. Replie
 validated before they are cached, failed requests are retried, and every call is logged to
 JSONL so a run can be audited and replayed.
 
-The primary path is an open-weight model you host yourself, for example with vLLM:
+The three runs so far used Claude Sonnet 5.5 (below). The same client works with an
+open-weight model you host yourself, for example with vLLM; this path has not yet been run
+end to end:
 
 ```bash
-vllm serve Qwen/Qwen3.8-27B
-python -m evloop llm-demo --base-url http://localhost:8000/v1 --model Qwen/Qwen3.8-27B --no-thinking
+vllm serve <model>
+python -m evloop llm-demo --base-url http://localhost:8000/v1 --model <model> --no-thinking
 ```
 
-`--no-thinking` turns off the reasoning mode that Qwen3-family models use by default when
+`--no-thinking` turns off the reasoning mode that some open-weight models use by default when
 served by vLLM. Other servers may ignore it. Reasoning blocks are stripped from every reply.
 If a model spends its whole token limit reasoning, the client stops with an error rather than
 continuing silently.
@@ -215,10 +281,10 @@ EVLOOP_API_KEY=... python -m evloop llm-demo --base-url https://api.anthropic.co
     --model claude-sonnet-5-5 --temperature -1 --extra-body '{"thinking": {"type": "between_tools"}}'
 ```
 
-### First real-model run
+### Runs with Claude Sonnet 5.5
 
-The LLM path was run end to end on Claude Sonnet 5.5 on 23 October 2026 (seed 1, about
-4,300 live calls, roughly $25). The model proposed four plain-language hypotheses per
+The LLM path was first run end to end on Claude Sonnet 5.5 on 23 October 2026 (seed 1, about
+4,300 live calls, $21 over 3.5 hours). The model proposed four plain-language hypotheses per
 evaluator, rewrote the applications, coded features and acted as every evaluator's copy;
 the simulated evaluators re-rated the edits as in the benchmark.
 
@@ -242,7 +308,7 @@ the simulated evaluators re-rated the edits as in the benchmark.
   - **Edits.** Free checks reject rewrites that change the sections, mix pronouns, switch
     pronouns without the name, or come back unchanged, and strip appended commentary.
     Battery edits also pass a verifier call that compares original and rewrite.
-    `python -m evloop audit-edits --log outputs/llm_sonnet/llm_calls.jsonl` replays
+    `python -m evloop audit-edits --log outputs/llm_sonnet/llm_calls.jsonl.gz` replays
     these checks over the first run's 1,822 rewrites: among rewrites where a change was
     needed, the old checks accepted 463 of 465 and 71% of those switched the detector;
     the new checks accept 393 and 84% switch it (gender edits: 100%, up from 51%).
@@ -304,6 +370,8 @@ evloop/report.py       figures and outputs/REPORT.md
 docs/technical_note.md specification for the technical appendix
 tests/                 unit tests and a stub LLM server
 outputs/               benchmark rows, summaries, figures, report
+outputs/llm_sonnet*/   the three language-model runs: audit trails, saved calls (llm_cache.tar.gz)
+                       and call logs (llm_calls.jsonl.gz); RUN_SUMMARY.md describes all three
 ```
 
 ## License

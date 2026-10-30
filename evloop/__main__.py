@@ -153,7 +153,9 @@ def cmd_audit_edits(a):
 
     rows = {}
     reasons = {}
-    for line in open(a.log):
+    import gzip
+    opener = gzip.open if a.log.endswith(".gz") else open
+    for line in opener(a.log, "rt"):
         c = json.loads(line)
         if "request" not in c:
             continue
@@ -258,7 +260,7 @@ def main():
                    help='JSON merged into every request, e.g. \'{"thinking": {"type": "between_tools"}}\' for Claude')
     l.add_argument("--out", default="outputs/llm"); l.set_defaults(f=cmd_llm_demo)
     au = sub.add_parser("audit-edits", help="replay the rewrite checks over a logged LLM run (no model calls)")
-    au.add_argument("--log", required=True, help="llm_calls.jsonl from a run")
+    au.add_argument("--log", required=True, help="llm_calls.jsonl (or .jsonl.gz) from a run")
     au.set_defaults(f=cmd_audit_edits)
     ap = sub.add_parser("app", help="local app: run the prototype on a simulated panel or on your own data")
     ap.add_argument("--port", type=int, default=8501); ap.set_defaults(f=cmd_app)

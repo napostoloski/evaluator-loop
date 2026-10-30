@@ -1,7 +1,14 @@
-# Technical note: the Route B loop and the planted-rule benchmark
+# Technical note: the evaluator loop and the planted-preference benchmark
 
 This note specifies the prototype in enough detail to evaluate it and to serve as the basis of
 the technical appendix. Code references are to the `evloop` package.
+
+**Terms.** The proposal uses plain-language names for what the code and this note call by
+shorter ones. A *preference* is a rule. The *statistical copy* of an evaluator is the twin.
+The *LASSO* is the offline proposer in step 2. The *re-ratings* form the battery in step 4.
+Table 1 of the proposal reports the methods called Full loop, Screen only, Twin only and
+Library regression in Section 3 below; the README maps every number in the proposal to the
+file it comes from.
 
 ## 1. Problem
 
@@ -258,8 +265,9 @@ Benchmark seeds are 100 to 111. Development and the tests used seeds below 20.
 | Proposer | Lasso on text features, mapped to a library of edit operators | LLM reads the applications each evaluator over- and under-rates and states hypotheses (`llm.propose_llm`) |
 | Edits | Exact re-rendering from attributes | LLM minimal rewrites with similarity and manipulation checks; a sample audited by a person |
 | Feature coding | Detectors with 5% error | LLM coding (`llm.code_llm`), validated against human coding |
-| Twin | Ridge text model of the residual | Few-shot LLM copy of the evaluator's deviations from the panel (`llm.LLMTwin`), then a fine-tuned open-weight model |
-| Confirmation | Re-rating by synthetic evaluators | Stage 2 re-rating battery with the original evaluators |
+| Twin | Ridge text model of the residual | The same ridge copy, screening the LLM's edits (the configuration of the second and third real-model runs); a few-shot LLM copy (`llm.LLMTwin`) remains an option |
+| Real data | Not applicable | `realdata.py` and the app load applications and ratings, run the loop up to screening, and export the edited applications for re-rating (`hypotheses.csv`, `edits_to_rerate.csv`) |
+| Confirmation | Re-rating by synthetic evaluators | Stage 2 re-rating battery with the original evaluators: hypotheses pooled across the panel, up to five features of 30 edited applications each, every evaluator re-rating all of them, plus about 15 unedited applications to measure re-rating consistency |
 | Outcomes | Simulated | Realized revenue and survival from December 2026 |
 
 `python -m evloop llm-demo` runs the same loop with an LLM backend on the synthetic
@@ -268,7 +276,7 @@ some common paraphrases but not all. The demo therefore measures partly whether 
 edits change the features as these detectors perceive them. The LLM backend's
 manipulation check uses the LLM coder instead.
 
-## 8. First real-model run
+## 8. Real-model runs
 
 On 23 October 2026 the LLM path ran end to end on Claude Sonnet 5.5 (seed 1, same world
 and budget as the benchmark). One of 16 planted preferences was confirmed, correctly and
@@ -283,7 +291,9 @@ polarity before the batteries; 30 pairs for the copy, with a ridge-copy option t
 no model calls; offline sanity checks on every rewrite (sections, pronoun consistency,
 unchanged text, commentary) and a verifier call on battery edits. Replayed over the first
 run's rewrites, the checks raise the share of accepted edits that switch the intended
-feature from 71% to 84%, and to 100% for the gender cue. A second run the same evening with the fixes (ridge screen on the model's rewrites, 20
+feature from 71% to 84%, and to 100% for the gender cue.
+
+A second run the same evening with the fixes (ridge screen on the model's rewrites, 20
 pairs, same world and budget) confirmed 6 of 16 planted preferences, all correct, with no
 false confirmations and seven correct rejections, for $8.49 in 62 minutes: the gender cue
 for three evaluators (two of them via pooled, polarity-flipped "male founder" statements),
@@ -300,3 +310,10 @@ remaining losses are the word-count screen's bias against broad edits (sector, w
 style), the power of 30 re-ratings per feature, and battery allocation by vote count.
 Across the three real-model runs, 14 of 14 confirmations are correct and no evaluator
 without a planted preference was given a rule.
+
+**Records and replay.** Every model call is cached with its full request and reply. The
+caches of all three runs are in `outputs/llm_sonnet*/llm_cache.tar.gz` and the call logs in
+`llm_calls.jsonl.gz` beside them. The third run replays exactly from its cache with the
+current code: no model calls are made and the same seven preferences are confirmed with the
+same estimates (README, "Reproducing the results"). The first two runs used earlier versions
+of the code, so their caches serve as an audit record rather than for an exact replay.
