@@ -70,7 +70,7 @@ SETTINGS = [
 HOW_APPLICATIONS = (
     "Each simulated panel has 156 applications. Every application is generated from a set of founder and "
     "venture attributes and written out as a short text with sections on the team, the venture and the "
-    "evidence, modelled on the XSEED application form. The attributes are the founder's gender (40% women), "
+    "evidence, modelled on the ARISE application form. The attributes are the founder's gender (40% women), "
     "shown through the name and pronouns; the city (60% in a large metropolitan city); the sector (consumer "
     "and lifestyle, or technology); whether the business runs from home; how fluent the English is (low "
     "fluency produces small writing slips); whether the founder has a foreign degree or grew up in a family "

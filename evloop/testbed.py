@@ -8,7 +8,7 @@ edit: only the sentences that express that attribute change.
 
 No real application text is used anywhere. Attribute distributions are stylised and
 should be replaced by the real marginals (sector, city, team size, founder gender)
-before the testbed is used as a stand-in for the XSEED data.
+before the testbed is used as a stand-in for the ARISE data.
 """
 from __future__ import annotations
 
